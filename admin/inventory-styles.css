@@ -1,0 +1,219 @@
+/* Inventory Page Styles */
+.inventory-content {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.main-logo {
+    max-height: 60px;
+    max-width: 200px;
+    width: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+/* Two-column layout with a left sidebar for categories */
+.layout-with-sidebar {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+/* Sidebar card container */
+.category-sidebar {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+
+.category-sidebar h3 {
+    margin-bottom: 12px;
+    color: var(--primary-green);
+}
+
+/* Bigger category buttons that fill the sidebar width */
+.category-sidebar .category-pill {
+    width: 100%;
+    text-align: left;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 1rem;
+}
+
+/* Back button for inventory header */
+.back-button {
+    appearance: none;
+    border: none;
+    background: var(--primary-green);
+    color: var(--white);
+    padding: 10px 14px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    box-shadow: var(--shadow);
+}
+.back-button .back-icon { font-size: 1rem; line-height: 1; }
+.back-button:hover { background: var(--dark-green); }
+.back-button:focus-visible { outline: 3px solid rgba(0, 102, 51, 0.25); outline-offset: 2px; }
+
+.page-title {
+    color: var(--primary-green);
+    font-size: 2.2rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.page-subtitle {
+    color: #666;
+    font-size: 1rem;
+    margin-bottom: 25px;
+}
+
+.inventory-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 20px;
+    width: 100%;
+}
+
+.search-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--white);
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 2px solid #e0e0e0;
+    box-sizing: border-box;
+}
+
+/* Normalize search input height/shape */
+.search-wrapper input {
+    border: none;
+    outline: none;
+    width: 100%;
+    font-size: 1rem;
+    height: 38px;
+    line-height: 38px;
+    flex: 1;
+    box-sizing: border-box;
+}
+
+.filters {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filters select {
+    padding: 10px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    background: var(--white);
+    font-size: 1rem;
+    height: 40px;
+}
+
+.equipment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+}
+
+.equipment-card {
+    background: var(--white);
+    border-radius: 14px;
+    border: 2px solid #e0e0e0;
+    box-shadow: 0 6px 18px rgba(0, 102, 51, 0.08);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.equipment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.equipment-id {
+    color: #777;
+    font-size: 0.85rem;
+}
+
+.status-badge {
+    padding: 6px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.status-badge.available { background: #e8f5e8; color: var(--secondary-green); }
+.status-badge.borrowed { background: #fff3e0; color: #ff9800; }
+.status-badge.maintenance { background: #e3f2fd; color: #2196f3; }
+.status-badge.out-of-service { background: #ffebee; color: #e53935; }
+
+.equipment-meta {
+    color: #555;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.card-actions .btn {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.btn-primary { background: var(--primary-green); color: var(--white); }
+.btn-secondary { background: var(--light-green); color: var(--primary-green); }
+
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    background: var(--white);
+    border-radius: 14px;
+    border: 2px solid #e0e0e0;
+}
+
+.empty-icon { font-size: 3rem; margin-bottom: 10px; }
+
+@media (max-width: 800px) {
+    .layout-with-sidebar { grid-template-columns: 1fr; }
+    .category-sidebar { position: static; max-height: none; }
+}
+
+@media (max-width: 600px) {
+    .filters { width: 100%; }
+    .filters select { flex: 1; }
+    
+    .search-wrapper {
+        flex: 1 1 100%;
+        min-width: 100%;
+        margin-bottom: 12px;
+    }
+    
+    .inventory-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
