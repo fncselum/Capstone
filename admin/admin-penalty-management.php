@@ -27,7 +27,15 @@ if ($conn->connect_error) {
 // Initialize penalty system
 $penaltySystem = new PenaltySystem($conn);
 
-// Handle penalty status updates
+// Get active guidelines for dropdown
+$activeGuidelines = $penaltySystem->getActiveGuidelines();
+
+// Handle success/error messages
+$success_message = $_SESSION['success_message'] ?? '';
+$error_message = $_SESSION['error_message'] ?? '';
+unset($_SESSION['success_message'], $_SESSION['error_message']);
+
+// Handle penalty operations
 if ($_POST && isset($_POST['action'])) {
     if ($_POST['action'] === 'create_penalty') {
         $rfid_id = trim($_POST['rfid_id'] ?? '');
@@ -36,18 +44,23 @@ if ($_POST && isset($_POST['action'])) {
         $equipment_name = trim($_POST['equipment_name'] ?? '');
         $penalty_type = $_POST['penalty_type'] ?? '';
         $penalty_amount = (float)($_POST['penalty_amount'] ?? 0);
+        $penalty_points = (int)($_POST['penalty_points'] ?? 0);
         $violation_date = $_POST['violation_date'] ?? date('Y-m-d');
         $days_overdue = (int)($_POST['days_overdue'] ?? 0);
+        $description = trim($_POST['description'] ?? '');
         $notes = $_POST['notes'] ?? '';
+        $guideline_id = !empty($_POST['guideline_id']) ? (int)$_POST['guideline_id'] : null;
 
-        if ($rfid_id && $transaction_id && $equipment_id && $equipment_name && in_array($penalty_type, ['Overdue','Damaged','Lost'])) {
+        if ($rfid_id && $transaction_id && $equipment_id && $equipment_name && in_array($penalty_type, ['Late Return','Overdue','Damage','Damaged','Loss','Lost','Misuse','Other'])) {
             $penalty_data = [
                 'penalty_type' => $penalty_type,
                 'penalty_amount' => $penalty_amount,
+                'penalty_points' => $penalty_points,
                 'days_overdue' => $days_overdue,
-                'violation_date' => $violation_date
+                'violation_date' => $violation_date,
+                'description' => $description
             ];
-            if ($penaltySystem->createPenalty($transaction_id, $rfid_id, $equipment_id, $equipment_name, $penalty_data, $notes)) {
+            if ($penaltySystem->createPenalty($transaction_id, $rfid_id, $equipment_id, $equipment_name, $penalty_data, $notes, $guideline_id)) {
                 $success_message = "Penalty created and set to Pending immediately.";
             } else {
                 $error_message = "Failed to create penalty: " . $conn->error;
@@ -76,29 +89,16 @@ if ($_POST && isset($_POST['action'])) {
 }
 
 // Handle filtering
-$status_filter = $_GET['status'] ?? 'all';
-$type_filter = $_GET['type'] ?? 'all';
+$filters = [
+    'status' => $_GET['status'] ?? 'all',
+    'type' => $_GET['type'] ?? 'all',
+    'search' => $_GET['search'] ?? '',
+    'date_from' => $_GET['date_from'] ?? '',
+    'date_to' => $_GET['date_to'] ?? ''
+];
 
-// Build query
-$where_conditions = [];
-if ($status_filter !== 'all') {
-    $where_conditions[] = "p.status = '" . $conn->real_escape_string($status_filter) . "'";
-}
-if ($type_filter !== 'all') {
-    $where_conditions[] = "p.penalty_type = '" . $conn->real_escape_string($type_filter) . "'";
-}
-
-$where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
-
-// Get penalties with guideline information
-$penalties_query = "SELECT p.*, t.transaction_date, pg.title as guideline_title, pg.penalty_type as guideline_type
-                   FROM penalties p 
-                   LEFT JOIN transactions t ON p.transaction_id = t.id 
-                   LEFT JOIN penalty_guidelines pg ON p.guideline_id = pg.id
-                   $where_clause
-                   ORDER BY p.date_imposed DESC, p.created_at DESC";
-
-$penalties_result = $conn->query($penalties_query);
+// Get penalties using the new method
+$penalties_result = $penaltySystem->getPenalties($filters);
 
 // Get penalty statistics
 $stats = $penaltySystem->getPenaltyStatistics();
@@ -188,14 +188,14 @@ $stats = $penaltySystem->getPenaltyStatistics();
             </header>
 
             <!-- Messages -->
-            <?php if (isset($success_message)): ?>
+            <?php if (!empty($success_message)): ?>
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i>
                     <?= htmlspecialchars($success_message) ?>
                 </div>
             <?php endif; ?>
 
-            <?php if (isset($error_message)): ?>
+            <?php if (!empty($error_message)): ?>
                 <div class="alert alert-error">
                     <i class="fas fa-exclamation-circle"></i>
                     <?= htmlspecialchars($error_message) ?>
@@ -303,9 +303,8 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                     <th>Student</th>
                                     <th>Equipment</th>
                                     <th>Type</th>
-                                    <th>Guideline</th>
                                     <th>Amount</th>
-                                    <th>Points</th>
+                                    <th>Days Overdue</th>
                                     <th>Violation Date</th>
                                     <th>Status</th>
                                     <th>Actions</th>
@@ -452,34 +451,12 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 </div>
 
                 <div class="form-group">
-                    <label for="guideline_id">Apply Penalty Guideline (Optional)</label>
-                    <select id="guideline_id" name="guideline_id" onchange="applyGuideline()">
-                        <option value="">-- Select a guideline to auto-fill --</option>
-                        <?php 
-                        $guidelines = $penaltySystem->getActiveGuidelines();
-                        foreach($guidelines as $guideline): 
-                        ?>
-                            <option value="<?= $guideline['id'] ?>" 
-                                    data-type="<?= htmlspecialchars($guideline['penalty_type']) ?>"
-                                    data-amount="<?= $guideline['penalty_amount'] ?>"
-                                    data-points="<?= $guideline['penalty_points'] ?>"
-                                    data-description="<?= htmlspecialchars($guideline['penalty_description']) ?>">
-                                <?= htmlspecialchars($guideline['title']) ?> - ₱<?= number_format($guideline['penalty_amount'], 2) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <small class="form-help">Select a guideline to automatically fill penalty details</small>
-                </div>
-
-                <div class="form-group">
                     <label for="penalty_type">Penalty Type</label>
                     <select id="penalty_type" name="penalty_type" required onchange="updatePenaltyAmount()">
                         <option value="">Select penalty type</option>
                         <option value="Overdue">Overdue</option>
                         <option value="Damaged">Damaged</option>
                         <option value="Lost">Lost</option>
-                        <option value="Misuse">Misuse</option>
-                        <option value="Other">Other</option>
                     </select>
                 </div>
 
@@ -831,40 +808,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 '<p>Penalty details for ID: ' + penaltyId + '</p>' +
                 '<p>This would show detailed penalty information including student details, equipment info, violation details, etc.</p>';
             document.getElementById('penaltyModal').style.display = 'block';
-        }
-        
-        // Apply guideline to form
-        function applyGuideline() {
-            const select = document.getElementById('guideline_id');
-            const selectedOption = select.options[select.selectedIndex];
-            
-            if (selectedOption.value) {
-                const type = selectedOption.dataset.type;
-                const amount = selectedOption.dataset.amount;
-                const points = selectedOption.dataset.points;
-                const description = selectedOption.dataset.description;
-                
-                // Auto-fill form fields
-                document.getElementById('penalty_type').value = type;
-                document.getElementById('penalty_amount').value = parseFloat(amount).toFixed(2);
-                
-                // Update notes with guideline description
-                const notesField = document.getElementById('notes');
-                if (notesField && description) {
-                    notesField.value = description;
-                }
-                
-                // Show preview
-                document.getElementById('penalty_preview').style.display = 'block';
-                document.getElementById('preview_content').innerHTML = `
-                    <p><strong>Type:</strong> ${type}</p>
-                    <p><strong>Amount:</strong> ₱${parseFloat(amount).toFixed(2)}</p>
-                    <p><strong>Points:</strong> ${points}</p>
-                    <p><strong>Description:</strong> ${description}</p>
-                `;
-            } else {
-                document.getElementById('penalty_preview').style.display = 'none';
-            }
         }
         
         function openCreatePenalty() {

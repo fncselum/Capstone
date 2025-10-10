@@ -11,27 +11,56 @@ class PenaltySystem {
     }
     
     /**
-     * Create a new penalty
+     * Create a new penalty with guideline support
      */
     public function createPenalty($transaction_id, $rfid_id, $equipment_id, $equipment_name, $penalty_data, $notes = '', $guideline_id = null) {
         $penalty_type = $this->conn->real_escape_string($penalty_data['penalty_type']);
         $penalty_amount = floatval($penalty_data['penalty_amount']);
+        $penalty_points = intval($penalty_data['penalty_points'] ?? $penalty_data['days_overdue'] ?? 0);
         $days_overdue = intval($penalty_data['days_overdue'] ?? 0);
         $violation_date = $this->conn->real_escape_string($penalty_data['violation_date']);
         $rfid_id_escaped = $this->conn->real_escape_string($rfid_id);
         $equipment_name_escaped = $this->conn->real_escape_string($equipment_name);
         $notes_escaped = $this->conn->real_escape_string($notes);
+        $description = $this->conn->real_escape_string($penalty_data['description'] ?? "$equipment_name_escaped - $notes_escaped");
         $guideline_id_value = $guideline_id ? intval($guideline_id) : 'NULL';
-        $created_by = $_SESSION['admin_id'] ?? 1;
+        $admin_id = $_SESSION['admin_id'] ?? 1;
         
         $sql = "INSERT INTO penalties 
-                (user_id, transaction_id, penalty_type, penalty_amount, penalty_points, 
-                 description, status, date_imposed, guideline_id, last_modified_by, created_at, updated_at) 
+                (guideline_id, user_id, transaction_id, penalty_type, penalty_amount, penalty_points, 
+                 days_overdue, description, equipment_name, notes, status, date_imposed, violation_date, 
+                 last_modified_by, created_at, updated_at) 
                 VALUES 
-                ('$rfid_id_escaped', $transaction_id, '$penalty_type', $penalty_amount, $days_overdue, 
-                 '$equipment_name_escaped - $notes_escaped', 'Pending', '$violation_date', $guideline_id_value, $created_by, NOW(), NOW())";
+                ($guideline_id_value, '$rfid_id_escaped', $transaction_id, '$penalty_type', $penalty_amount, $penalty_points, 
+                 $days_overdue, '$description', '$equipment_name_escaped', '$notes_escaped', 'Pending', NOW(), '$violation_date', 
+                 $admin_id, NOW(), NOW())";
         
         return $this->conn->query($sql);
+    }
+    
+    /**
+     * Get penalty guideline by ID
+     */
+    public function getGuidelineById($guideline_id) {
+        $guideline_id = intval($guideline_id);
+        $sql = "SELECT * FROM penalty_guidelines WHERE id = $guideline_id AND status = 'active'";
+        $result = $this->conn->query($sql);
+        return $result ? $result->fetch_assoc() : null;
+    }
+    
+    /**
+     * Get all active guidelines
+     */
+    public function getActiveGuidelines() {
+        $sql = "SELECT * FROM penalty_guidelines WHERE status = 'active' ORDER BY title ASC";
+        $result = $this->conn->query($sql);
+        $guidelines = [];
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $guidelines[] = $row;
+            }
+        }
+        return $guidelines;
     }
     
     /**
@@ -41,69 +70,19 @@ class PenaltySystem {
         $penalty_id = intval($penalty_id);
         $status_escaped = $this->conn->real_escape_string($status);
         $notes_escaped = $this->conn->real_escape_string($notes);
-        $admin_id = $_SESSION['admin_id'] ?? 1;
         
         $date_resolved = ($status === 'Resolved') ? "NOW()" : "NULL";
-        $resolved_by = ($status === 'Resolved') ? $admin_id : "NULL";
+        $resolved_by = ($status === 'Resolved') ? "'" . ($_SESSION['admin_id'] ?? 1) . "'" : "NULL";
         
         $sql = "UPDATE penalties 
                 SET status = '$status_escaped', 
                     date_resolved = $date_resolved,
                     resolved_by = $resolved_by,
-                    last_modified_by = $admin_id,
-                    last_modified_at = NOW(),
                     description = CONCAT(description, ' - ', '$notes_escaped'),
                     updated_at = NOW()
                 WHERE id = $penalty_id";
         
         return $this->conn->query($sql);
-    }
-    
-    /**
-     * Update penalty details
-     */
-    public function updatePenalty($penalty_id, $penalty_data) {
-        $penalty_id = intval($penalty_id);
-        $penalty_type = $this->conn->real_escape_string($penalty_data['penalty_type']);
-        $penalty_amount = floatval($penalty_data['penalty_amount']);
-        $penalty_points = intval($penalty_data['penalty_points'] ?? 0);
-        $description = $this->conn->real_escape_string($penalty_data['description']);
-        $guideline_id = isset($penalty_data['guideline_id']) && $penalty_data['guideline_id'] ? intval($penalty_data['guideline_id']) : 'NULL';
-        $admin_id = $_SESSION['admin_id'] ?? 1;
-        
-        $sql = "UPDATE penalties 
-                SET penalty_type = '$penalty_type',
-                    penalty_amount = $penalty_amount,
-                    penalty_points = $penalty_points,
-                    description = '$description',
-                    guideline_id = $guideline_id,
-                    last_modified_by = $admin_id,
-                    last_modified_at = NOW(),
-                    updated_at = NOW()
-                WHERE id = $penalty_id";
-        
-        return $this->conn->query($sql);
-    }
-    
-    /**
-     * Get all active guidelines for dropdown
-     */
-    public function getActiveGuidelines() {
-        $sql = "SELECT id, title, penalty_type, penalty_amount, penalty_points, penalty_description 
-                FROM penalty_guidelines 
-                WHERE status = 'active' 
-                ORDER BY penalty_type, title";
-        
-        $result = $this->conn->query($sql);
-        $guidelines = [];
-        
-        if ($result) {
-            while ($row = $result->fetch_assoc()) {
-                $guidelines[] = $row;
-            }
-        }
-        
-        return $guidelines;
     }
     
     /**
@@ -179,11 +158,85 @@ class PenaltySystem {
     }
     
     /**
+     * Update penalty details
+     */
+    public function updatePenalty($penalty_id, $penalty_data, $guideline_id = null) {
+        $penalty_id = intval($penalty_id);
+        $penalty_type = $this->conn->real_escape_string($penalty_data['penalty_type']);
+        $penalty_amount = floatval($penalty_data['penalty_amount']);
+        $penalty_points = intval($penalty_data['penalty_points'] ?? 0);
+        $days_overdue = intval($penalty_data['days_overdue'] ?? 0);
+        $description = $this->conn->real_escape_string($penalty_data['description'] ?? '');
+        $notes = $this->conn->real_escape_string($penalty_data['notes'] ?? '');
+        $guideline_id_value = $guideline_id ? intval($guideline_id) : 'NULL';
+        $admin_id = $_SESSION['admin_id'] ?? 1;
+        
+        $sql = "UPDATE penalties 
+                SET guideline_id = $guideline_id_value,
+                    penalty_type = '$penalty_type',
+                    penalty_amount = $penalty_amount,
+                    penalty_points = $penalty_points,
+                    days_overdue = $days_overdue,
+                    description = '$description',
+                    notes = '$notes',
+                    last_modified_by = $admin_id,
+                    last_modified_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = $penalty_id";
+        
+        return $this->conn->query($sql);
+    }
+    
+    /**
      * Delete penalty
      */
     public function deletePenalty($penalty_id) {
         $penalty_id = intval($penalty_id);
         $sql = "DELETE FROM penalties WHERE id = $penalty_id";
+        return $this->conn->query($sql);
+    }
+    
+    /**
+     * Get penalties with filters and search
+     */
+    public function getPenalties($filters = []) {
+        $where_conditions = [];
+        
+        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+            $status = $this->conn->real_escape_string($filters['status']);
+            $where_conditions[] = "p.status = '$status'";
+        }
+        
+        if (!empty($filters['type']) && $filters['type'] !== 'all') {
+            $type = $this->conn->real_escape_string($filters['type']);
+            $where_conditions[] = "p.penalty_type = '$type'";
+        }
+        
+        if (!empty($filters['search'])) {
+            $search = $this->conn->real_escape_string($filters['search']);
+            $where_conditions[] = "(p.user_id LIKE '%$search%' OR p.equipment_name LIKE '%$search%' OR p.transaction_id LIKE '%$search%')";
+        }
+        
+        if (!empty($filters['date_from'])) {
+            $date_from = $this->conn->real_escape_string($filters['date_from']);
+            $where_conditions[] = "p.date_imposed >= '$date_from'";
+        }
+        
+        if (!empty($filters['date_to'])) {
+            $date_to = $this->conn->real_escape_string($filters['date_to']);
+            $where_conditions[] = "p.date_imposed <= '$date_to'";
+        }
+        
+        $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
+        
+        $sql = "SELECT p.*, 
+                       pg.title as guideline_title,
+                       pg.penalty_description as guideline_description
+                FROM penalties p
+                LEFT JOIN penalty_guidelines pg ON p.guideline_id = pg.id
+                $where_clause
+                ORDER BY p.created_at DESC";
+        
         return $this->conn->query($sql);
     }
     
