@@ -39,7 +39,7 @@ if ($db_connected) {
 		if ($equipment_id > 0 && !empty($due_date)) {
 			$conn->begin_transaction();
 			try {
-				// Get equipment details
+				// Get equipment details with lock
 				$stmt = $conn->prepare("SELECT * FROM equipment WHERE id = ? FOR UPDATE");
 				$stmt->bind_param("i", $equipment_id);
 				$stmt->execute();
@@ -48,44 +48,76 @@ if ($db_connected) {
 				if ($result->num_rows === 1) {
 					$equip_data = $result->fetch_assoc();
 					$current_qty = (int)($equip_data['quantity'] ?? 0);
+					$equipment_name = $equip_data['name'] ?? 'Unknown';
+					$condition_before = $equip_data['item_condition'] ?? 'Good';
 					
 					if ($current_qty > 0) {
 						$new_qty = $current_qty - 1;
 						
 						// Update equipment quantity
-						$update_stmt = $conn->prepare("UPDATE equipment SET quantity = ? WHERE id = ?");
+						$update_stmt = $conn->prepare("UPDATE equipment SET quantity = ?, updated_at = NOW() WHERE id = ?");
 						$update_stmt->bind_param("ii", $new_qty, $equipment_id);
-						$update_stmt->execute();
 						
-						// Insert transaction record
+						if (!$update_stmt->execute()) {
+							throw new Exception("Failed to update equipment quantity");
+						}
+						
+						// Insert transaction record with all required fields
 						$transaction_type = 'Borrow';
+						$quantity = 1; // Borrowing 1 item at a time
+						$transaction_date = date('Y-m-d H:i:s');
+						$expected_return_date = date('Y-m-d H:i:s', strtotime($due_date));
 						$status = 'Active';
-						$borrow_date = date('Y-m-d H:i:s');
-						$due_datetime = date('Y-m-d H:i:s', strtotime($due_date));
+						$penalty_applied = 0;
+						$notes = "Borrowed via kiosk by student ID: " . $student_id;
 						
 						$trans_stmt = $conn->prepare("INSERT INTO transactions 
-							(user_id, equipment_id, transaction_type, status, borrow_date, due_date, created_at) 
-							VALUES (?, ?, ?, ?, ?, ?, NOW())");
-						$trans_stmt->bind_param("iissss", $user_id, $equipment_id, $transaction_type, $status, $borrow_date, $due_datetime);
+							(user_id, equipment_id, transaction_type, quantity, transaction_date, 
+							expected_return_date, condition_before, status, penalty_applied, notes, created_at, updated_at) 
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
+						
+						$trans_stmt->bind_param("iisiisssis", 
+							$user_id, 
+							$equipment_id, 
+							$transaction_type, 
+							$quantity,
+							$transaction_date, 
+							$expected_return_date, 
+							$condition_before,
+							$status,
+							$penalty_applied,
+							$notes
+						);
 						
 						if ($trans_stmt->execute()) {
+							$transaction_id = $conn->insert_id;
 							$conn->commit();
-							$message = 'Equipment borrowed successfully! Please return by ' . date('M j, Y g:i A', strtotime($due_datetime));
+							
+							// Success message with details
+							$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
+							$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
 						} else {
-							throw new Exception("Failed to record transaction: " . $conn->error);
+							throw new Exception("Failed to record transaction: " . $trans_stmt->error);
 						}
+						
+						$trans_stmt->close();
+						$update_stmt->close();
 					} else {
-						$error = 'Sorry, this equipment is out of stock.';
+						$conn->rollback();
+						$error = 'Sorry, this equipment is currently out of stock.';
 					}
 				} else {
-					$error = 'Equipment not found.';
+					$conn->rollback();
+					$error = 'Equipment not found in the system.';
 				}
+				
+				$stmt->close();
 			} catch (Exception $ex) {
 				$conn->rollback();
 				$error = 'Borrow failed: ' . $ex->getMessage();
 			}
 		} else {
-			$error = 'Please provide all required information.';
+			$error = 'Please provide all required information (equipment and return date).';
 		}
 	}
 
@@ -99,7 +131,7 @@ if ($db_connected) {
 	          FROM equipment e 
 	          LEFT JOIN categories c ON e.category_id = c.id 
 	          WHERE e.quantity > 0
-	          ORDER BY e.name";
+	          ORDER BY e.id ASC";
 	if ($result = $conn->query($query)) {
 		while ($row = $result->fetch_assoc()) { $equipment_list[] = $row; }
 		$result->free();
@@ -141,25 +173,60 @@ if ($db_connected) {
 			</div>
 
 			<?php if ($message): ?>
-				<div class="alert alert-success">
-					<i class="fas fa-check-circle"></i>
-					<div>
-						<strong>Success!</strong>
-						<p><?= htmlspecialchars($message) ?></p>
+			<!-- Success Modal -->
+			<div id="successModal" class="notification-modal">
+				<div class="notification-modal-content success-modal">
+					<div class="success-icon-wrapper">
+						<div class="success-checkmark">
+							<div class="check-icon">
+								<span class="icon-line line-tip"></span>
+								<span class="icon-line line-long"></span>
+								<div class="icon-circle"></div>
+								<div class="icon-fix"></div>
+							</div>
+						</div>
+					</div>
+					<h2 class="notification-title">Success!</h2>
+					<p class="notification-message"><?= $message ?></p>
+					<div class="notification-footer">
+						<p class="redirect-text">Redirecting in <span id="countdown">10</span> seconds...</p>
 					</div>
 				</div>
-				<script>
-				setTimeout(function(){ window.location.href = 'borrow-return.php'; }, 3000);
-				</script>
-			<?php elseif ($error): ?>
-				<div class="alert alert-error">
-					<i class="fas fa-exclamation-circle"></i>
-					<div>
-						<strong>Error!</strong>
-						<p><?= htmlspecialchars($error) ?></p>
+			</div>
+			<script>
+			// Show modal with animation
+			document.getElementById('successModal').style.display = 'flex';
+			
+			// Countdown and redirect
+			let countdown = 10;
+			const countdownElement = document.getElementById('countdown');
+			const countdownInterval = setInterval(() => {
+				countdown--;
+				countdownElement.textContent = countdown;
+				if (countdown <= 0) {
+					clearInterval(countdownInterval);
+					window.location.href = 'borrow-return.php';
+				}
+			}, 1000);
+			</script>
+		<?php elseif ($error): ?>
+			<!-- Error Modal -->
+			<div id="errorModal" class="notification-modal">
+				<div class="notification-modal-content error-modal">
+					<div class="error-icon-wrapper">
+						<i class="fas fa-times-circle"></i>
 					</div>
+					<h2 class="notification-title">Oops!</h2>
+					<p class="notification-message"><?= htmlspecialchars($error) ?></p>
+					<button class="notification-btn" onclick="document.getElementById('errorModal').style.display='none'">
+						<i class="fas fa-check"></i> Got it
+					</button>
 				</div>
-			<?php endif; ?>
+			</div>
+			<script>
+			document.getElementById('errorModal').style.display = 'flex';
+			</script>
+		<?php endif; ?>
 
 			<!-- Category Filter -->
 			<div class="category-filter-bar">
@@ -234,7 +301,7 @@ if ($db_connected) {
 	<div id="borrowModal" class="modal-overlay">
 		<div class="modal-box">
 			<div class="modal-header">
-				<h2><i class="fas fa-hand-holding"></i> Confirm Borrow</h2>
+				<h2>Borrow Equipment</h2>
 				<button class="modal-close" onclick="closeBorrowModal()">
 					<i class="fas fa-times"></i>
 				</button>
@@ -247,9 +314,9 @@ if ($db_connected) {
 						<img id="modalEquipmentImage" src="" alt="">
 						<i id="modalEquipmentIcon" class="fas fa-box" style="display:none;"></i>
 					</div>
-					<div class="modal-equip-info-large">
+					<div class="modal-equip-info-left">
 						<h3 id="modalEquipmentName"></h3>
-						<p><i class="fas fa-boxes"></i> <span id="modalEquipmentQty"></span> available</p>
+						<p class="modal-qty"><i class="fas fa-boxes"></i> <span id="modalEquipmentQty"></span> available</p>
 					</div>
 				</div>
 				
@@ -319,6 +386,24 @@ if ($db_connected) {
 			iconElement.style.display = 'flex';
 		}
 		
+		// Set current borrow time with live update
+		function updateBorrowTime() {
+			const now = new Date();
+			const options = { 
+				year: 'numeric', 
+				month: 'short', 
+				day: 'numeric', 
+				hour: '2-digit', 
+				minute: '2-digit',
+				second: '2-digit',
+				hour12: true 
+			};
+			document.getElementById('borrow_time').value = now.toLocaleString('en-US', options);
+		}
+		updateBorrowTime();
+		// Update every second
+		const borrowTimeInterval = setInterval(updateBorrowTime, 1000);
+		
 		// Set minimum date to current date/time
 		const now = new Date();
 		const year = now.getFullYear();
@@ -336,11 +421,19 @@ if ($db_connected) {
 		const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}T${hours}:${minutes}`;
 		dueDateInput.value = tomorrowStr;
 		
+		// Store interval ID to clear it later
+		document.getElementById('borrowModal').dataset.intervalId = borrowTimeInterval;
 		document.getElementById('borrowModal').style.display = 'flex';
 	}
 
 	function closeBorrowModal() {
-		document.getElementById('borrowModal').style.display = 'none';
+		const modal = document.getElementById('borrowModal');
+		// Clear the time update interval
+		const intervalId = modal.dataset.intervalId;
+		if (intervalId) {
+			clearInterval(parseInt(intervalId));
+		}
+		modal.style.display = 'none';
 	}
 
 	// Close modal when clicking outside
@@ -353,34 +446,125 @@ if ($db_connected) {
 	// Category filter
 	document.addEventListener('DOMContentLoaded', function() {
 		const filterButtons = document.querySelectorAll('.filter-btn');
-		let activeCategory = 'all';
-
-		function filterEquipment() {
-			const cards = document.querySelectorAll('.equip-card');
-			let visibleCount = 0;
-
-			cards.forEach(card => {
-				const category = card.dataset.category || '';
-				const matchesCategory = activeCategory === 'all' || category === activeCategory;
-				
-				if (matchesCategory) {
-					card.style.display = 'block';
-					visibleCount++;
-				} else {
-					card.style.display = 'none';
-				}
-			});
-		}
 
 		filterButtons.forEach(btn => {
 			btn.addEventListener('click', () => {
 				filterButtons.forEach(b => b.classList.remove('active'));
 				btn.classList.add('active');
 				activeCategory = btn.dataset.category;
-				filterEquipment();
+				filterEquipmentByCategory();
 			});
 		});
 	});
+
+	// Auto-refresh equipment list
+	let lastUpdateTime = <?= time() ?>;
+	let activeCategory = 'all';
+
+	function refreshEquipmentList() {
+		fetch('get_equipment.php')
+			.then(response => response.json())
+			.then(data => {
+				if (data.success) {
+					// Always update to show latest data (including quantity changes)
+					updateEquipmentGrid(data.equipment);
+					lastUpdateTime = data.timestamp;
+					// Silent update - no console log to keep it clean
+				}
+			})
+			.catch(error => {
+				// Silent error handling - continues trying
+				console.error('Error fetching equipment:', error);
+			});
+	}
+
+	function updateEquipmentGrid(equipmentList) {
+		const grid = document.getElementById('equipmentGrid');
+		
+		if (equipmentList.length === 0) {
+			grid.innerHTML = `
+				<div class="empty-state">
+					<i class="fas fa-box-open" style="font-size: 80px; color: #ccc;"></i>
+					<h3>No Equipment Available</h3>
+					<p>There are currently no equipment items available for borrowing.</p>
+				</div>
+			`;
+			return;
+		}
+
+		let html = '';
+		equipmentList.forEach(item => {
+			const categoryKey = (item.category_name || '').toLowerCase();
+			const qty = parseInt(item.quantity) || 0;
+			
+			// Handle image path
+			let imageSrc = item.image_path || '';
+			if (imageSrc) {
+				if (imageSrc.indexOf('uploads/') === 0) {
+					imageSrc = '../' + imageSrc;
+				} else if (imageSrc.indexOf('../') !== 0 && imageSrc.indexOf('http') !== 0) {
+					imageSrc = '../uploads/' + imageSrc.split('/').pop();
+				}
+			}
+
+			html += `
+				<div class="equip-card" 
+					data-name="${(item.name || '').toLowerCase()}" 
+					data-category="${categoryKey}">
+					
+					<div class="equip-image">
+						${imageSrc ? `
+							<img src="${imageSrc}" alt="${item.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+							<i class="fas fa-box" style="display:none;"></i>
+						` : `
+							<i class="fas fa-box"></i>
+						`}
+					</div>
+					
+					<div class="equip-details">
+						<span class="equip-id">#${item.id}</span>
+						<h3 class="equip-name">${item.name}</h3>
+						<p class="equip-category">
+							<i class="fas fa-tag"></i> ${item.category_name || 'Uncategorized'}
+						</p>
+						<div class="equip-qty">
+							<i class="fas fa-boxes"></i> 
+							<span>${qty} available</span>
+						</div>
+					</div>
+					
+					<button class="borrow-btn" onclick="openBorrowModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', ${qty}, '${(imageSrc || '').replace(/'/g, "\\'")}')">
+						<i class="fas fa-hand-holding"></i> Borrow
+					</button>
+				</div>
+			`;
+		});
+
+		grid.innerHTML = html;
+		
+		// Reapply category filter
+		filterEquipmentByCategory();
+	}
+
+	function filterEquipmentByCategory() {
+		const cards = document.querySelectorAll('.equip-card');
+		let visibleCount = 0;
+
+		cards.forEach(card => {
+			const category = card.dataset.category || '';
+			const matchesCategory = activeCategory === 'all' || category === activeCategory;
+			
+			if (matchesCategory) {
+				card.style.display = 'block';
+				visibleCount++;
+			} else {
+				card.style.display = 'none';
+			}
+		});
+	}
+
+	// Refresh every 5 seconds
+	setInterval(refreshEquipmentList, 5000);
 
 	// Auto-logout after 5 minutes
 	let inactivityTime = function () {
@@ -403,11 +587,26 @@ if ($db_connected) {
 	</script>
 
 	<style>
+	/* Override body styles for scrolling */
+	body {
+		display: block !important;
+		align-items: unset !important;
+		overflow-y: auto !important;
+		min-height: 100vh;
+	}
+
+	.container {
+		min-height: 100vh;
+		display: flex;
+		flex-direction: column;
+	}
+
 	/* Borrow Page Styles */
 	.borrow-page-content {
 		padding: 2vh 3vw;
 		max-width: 1400px;
 		margin: 0 auto;
+		flex: 1;
 	}
 
 	.borrow-header {
@@ -500,6 +699,207 @@ if ($db_connected) {
 
 	.alert p {
 		margin: 0;
+	}
+
+	/* Notification Modal */
+	.notification-modal {
+		display: none;
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: rgba(0, 0, 0, 0.7);
+		backdrop-filter: blur(5px);
+		z-index: 10000;
+		justify-content: center;
+		align-items: center;
+		animation: fadeIn 0.3s ease;
+	}
+
+	.notification-modal-content {
+		background: white;
+		border-radius: 25px;
+		padding: 50px 60px;
+		text-align: center;
+		max-width: 500px;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+		animation: slideUpBounce 0.5s ease;
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@keyframes slideUpBounce {
+		0% { transform: translateY(100px); opacity: 0; }
+		60% { transform: translateY(-10px); opacity: 1; }
+		80% { transform: translateY(5px); }
+		100% { transform: translateY(0); }
+	}
+
+	/* Success Modal */
+	.success-icon-wrapper {
+		margin: 0 auto 30px;
+	}
+
+	.success-checkmark {
+		width: 100px;
+		height: 100px;
+		margin: 0 auto;
+	}
+
+	.check-icon {
+		width: 100px;
+		height: 100px;
+		position: relative;
+		border-radius: 50%;
+		box-sizing: content-box;
+		border: 4px solid #4caf50;
+		background: #f0f9f4;
+	}
+
+	.icon-line {
+		height: 5px;
+		background-color: #4caf50;
+		display: block;
+		border-radius: 2px;
+		position: absolute;
+		z-index: 10;
+	}
+
+	.icon-line.line-tip {
+		top: 46px;
+		left: 14px;
+		width: 25px;
+		transform: rotate(45deg);
+		animation: checkTip 0.75s;
+	}
+
+	.icon-line.line-long {
+		top: 38px;
+		right: 8px;
+		width: 47px;
+		transform: rotate(-45deg);
+		animation: checkLong 0.75s;
+	}
+
+	.icon-circle {
+		top: -4px;
+		left: -4px;
+		z-index: 10;
+		width: 100px;
+		height: 100px;
+		border-radius: 50%;
+		position: absolute;
+		box-sizing: content-box;
+		border: 4px solid rgba(76, 175, 80, 0.5);
+		animation: scaleCircle 0.5s;
+	}
+
+	.icon-fix {
+		top: 8px;
+		width: 5px;
+		left: 26px;
+		z-index: 1;
+		height: 85px;
+		position: absolute;
+		transform: rotate(-45deg);
+		background-color: white;
+	}
+
+	@keyframes scaleCircle {
+		0% { transform: scale(0); }
+		100% { transform: scale(1); }
+	}
+
+	@keyframes checkTip {
+		0% { width: 0; left: 1px; top: 19px; }
+		54% { width: 0; left: 1px; top: 19px; }
+		70% { width: 50px; left: -8px; top: 37px; }
+		84% { width: 17px; left: 21px; top: 48px; }
+		100% { width: 25px; left: 14px; top: 46px; }
+	}
+
+	@keyframes checkLong {
+		0% { width: 0; right: 46px; top: 54px; }
+		65% { width: 0; right: 46px; top: 54px; }
+		84% { width: 55px; right: 0; top: 35px; }
+		100% { width: 47px; right: 8px; top: 38px; }
+	}
+
+	.notification-title {
+		font-size: 2rem;
+		color: #333;
+		margin-bottom: 20px;
+		font-weight: 700;
+	}
+
+	.notification-message {
+		font-size: 1.1rem;
+		color: #666;
+		margin-bottom: 30px;
+		line-height: 1.8;
+	}
+
+	.notification-footer {
+		margin-top: 25px;
+	}
+
+	.redirect-text {
+		font-size: 1rem;
+		color: #999;
+		font-weight: 500;
+	}
+
+	.redirect-text span {
+		color: #4caf50;
+		font-weight: 700;
+		font-size: 1.2rem;
+	}
+
+	/* Error Modal */
+	.error-icon-wrapper {
+		width: 100px;
+		height: 100px;
+		background: linear-gradient(135deg, #ff6b6b, #ee5a6f);
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin: 0 auto 30px;
+		box-shadow: 0 10px 30px rgba(238, 90, 111, 0.3);
+		animation: scaleIn 0.5s ease;
+	}
+
+	.error-icon-wrapper i {
+		font-size: 50px;
+		color: white;
+	}
+
+	@keyframes scaleIn {
+		0% { transform: scale(0); }
+		50% { transform: scale(1.1); }
+		100% { transform: scale(1); }
+	}
+
+	.notification-btn {
+		background: linear-gradient(135deg, #1e5631, #2d7a45);
+		color: white;
+		border: none;
+		padding: 15px 40px;
+		border-radius: 12px;
+		font-size: 1.1rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.3s ease;
+		box-shadow: 0 4px 15px rgba(30, 86, 49, 0.3);
+	}
+
+	.notification-btn:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 20px rgba(30, 86, 49, 0.4);
 	}
 
 	/* Category Filter */
@@ -668,9 +1068,9 @@ if ($db_connected) {
 		background: white;
 		border-radius: 20px;
 		width: 90%;
-		max-width: 600px;
+		max-width: 900px;
 		max-height: 90vh;
-		overflow-y: auto;
+		overflow: hidden;
 		animation: modalSlideIn 0.3s ease;
 	}
 
@@ -686,20 +1086,19 @@ if ($db_connected) {
 	}
 
 	.modal-header {
-		padding: 25px;
+		padding: 20px 25px;
 		border-bottom: 1px solid #eee;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		background: #f8f9fa;
 	}
 
 	.modal-header h2 {
 		margin: 0;
-		font-size: 1.5rem;
+		font-size: 1.4rem;
 		color: #1e5631;
-		display: flex;
-		align-items: center;
-		gap: 10px;
+		font-weight: 600;
 	}
 
 	.modal-close {
@@ -718,57 +1117,78 @@ if ($db_connected) {
 	}
 
 	.modal-close:hover {
-		background: #f0f0f0;
+		background: #e0e0e0;
 	}
 
-	.modal-body {
-		padding: 25px;
-	}
-
-	.modal-equipment-preview {
+	/* Landscape Layout */
+	.modal-body-landscape {
 		display: flex;
-		gap: 20px;
-		margin-bottom: 25px;
-		padding: 20px;
-		background: #f8f9fa;
-		border-radius: 12px;
+		height: 500px;
 	}
 
-	.modal-equip-image {
-		width: 120px;
-		height: 120px;
-		border-radius: 10px;
+	/* Left Side - Equipment Preview */
+	.modal-left {
+		flex: 0 0 320px;
+		background: #f8f9fa;
+		padding: 30px;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 20px;
+		border-right: 1px solid #e0e0e0;
+	}
+
+	.modal-equip-image-large {
+		width: 200px;
+		height: 200px;
+		border-radius: 15px;
 		overflow: hidden;
 		background: white;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		flex-shrink: 0;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 	}
 
-	.modal-equip-image img {
+	.modal-equip-image-large img {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
 	}
 
-	.modal-equip-image i {
-		font-size: 50px;
+	.modal-equip-image-large i {
+		font-size: 80px;
 		color: #ccc;
 	}
 
-	.modal-equip-info h3 {
-		margin: 0 0 10px 0;
-		font-size: 1.3rem;
-		color: #333;
+	.modal-equip-info-left {
+		text-align: center;
 	}
 
-	.modal-equip-info p {
+	.modal-equip-info-left h3 {
+		margin: 0 0 10px 0;
+		font-size: 1.4rem;
+		color: #333;
+		font-weight: 700;
+	}
+
+	.modal-qty {
 		margin: 0;
-		color: #666;
+		color: #1e5631;
+		font-weight: 600;
+		font-size: 1rem;
 		display: flex;
 		align-items: center;
+		justify-content: center;
 		gap: 8px;
+	}
+
+	/* Right Side - Form */
+	.modal-right {
+		flex: 1;
+		padding: 30px;
+		overflow-y: auto;
 	}
 
 	.form-field {
@@ -880,12 +1300,27 @@ if ($db_connected) {
 			grid-template-columns: 1fr;
 		}
 
-		.modal-equipment-preview {
+		.modal-body-landscape {
 			flex-direction: column;
+			height: auto;
+			max-height: 80vh;
+			overflow-y: auto;
 		}
 
-		.modal-equip-image {
-			width: 100%;
+		.modal-left {
+			flex: none;
+			border-right: none;
+			border-bottom: 1px solid #e0e0e0;
+			padding: 20px;
+		}
+
+		.modal-equip-image-large {
+			width: 150px;
+			height: 150px;
+		}
+
+		.modal-right {
+			padding: 20px;
 		}
 	}
 	</style>

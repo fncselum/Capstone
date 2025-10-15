@@ -354,34 +354,175 @@ if (!$conn->connect_error) {
         }
         
         function logout() {
-            if (confirm('Are you sure you want to logout?\n\nYou will need to scan your RFID again to continue.')) {
-                // Show loading message
-                document.body.innerHTML = `
+            // Create modern confirmation modal
+            const modal = document.createElement('div');
+            modal.innerHTML = `
+                <div style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.7);
+                    backdrop-filter: blur(5px);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 9999;
+                    animation: fadeIn 0.3s ease;
+                ">
                     <div style="
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100%;
-                        background: rgba(30, 86, 49, 0.95);
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: center;
-                        align-items: center;
-                        z-index: 9999;
-                        color: white;
+                        background: white;
+                        border-radius: 25px;
+                        padding: 50px 60px;
+                        text-align: center;
+                        max-width: 500px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        animation: slideUp 0.3s ease;
                     ">
-                        <div style="text-align: center;">
-                            <i class="fas fa-spinner fa-spin" style="font-size: 60px; margin-bottom: 20px;"></i>
-                            <h2 style="font-size: 2rem; margin-bottom: 10px;">Logging out...</h2>
-                            <p style="font-size: 1.2rem; opacity: 0.9;">Please wait</p>
+                        <div style="
+                            width: 80px;
+                            height: 80px;
+                            background: linear-gradient(135deg, #ff6b6b, #ee5a6f);
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            margin: 0 auto 25px;
+                            box-shadow: 0 10px 30px rgba(238, 90, 111, 0.3);
+                        ">
+                            <i class="fas fa-sign-out-alt" style="font-size: 40px; color: white;"></i>
+                        </div>
+                        <h2 style="
+                            font-size: 1.8rem;
+                            color: #333;
+                            margin-bottom: 15px;
+                            font-weight: 700;
+                        ">Confirm Logout</h2>
+                        <p style="
+                            font-size: 1.1rem;
+                            color: #666;
+                            margin-bottom: 35px;
+                            line-height: 1.6;
+                        ">Are you sure you want to logout?<br>You will need to scan your RFID again to continue.</p>
+                        <div style="display: flex; gap: 15px; justify-content: center;">
+                            <button onclick="this.closest('div').parentElement.parentElement.remove()" style="
+                                background: #f5f5f5;
+                                color: #666;
+                                border: none;
+                                padding: 15px 35px;
+                                border-radius: 12px;
+                                font-size: 1rem;
+                                font-weight: 600;
+                                cursor: pointer;
+                                transition: all 0.3s ease;
+                            " onmouseover="this.style.background='#e0e0e0'" onmouseout="this.style.background='#f5f5f5'">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
+                            <button onclick="confirmLogout()" style="
+                                background: linear-gradient(135deg, #1e5631, #2d7a45);
+                                color: white;
+                                border: none;
+                                padding: 15px 35px;
+                                border-radius: 12px;
+                                font-size: 1rem;
+                                font-weight: 600;
+                                cursor: pointer;
+                                transition: all 0.3s ease;
+                                box-shadow: 0 4px 15px rgba(30, 86, 49, 0.3);
+                            " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(30, 86, 49, 0.4)'" onmouseout="this.style.transform=''; this.style.boxShadow='0 4px 15px rgba(30, 86, 49, 0.3)'">
+                                <i class="fas fa-check"></i> Yes, Logout
+                            </button>
                         </div>
                     </div>
-                `;
-                setTimeout(() => {
-                    window.location.href = 'logout.php';
-                }, 1000);
-            }
+                </div>
+                <style>
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+                    @keyframes slideUp {
+                        from { transform: translateY(50px); opacity: 0; }
+                        to { transform: translateY(0); opacity: 1; }
+                    }
+                    @keyframes spin {
+                        from { transform: rotate(0deg); }
+                        to { transform: rotate(360deg); }
+                    }
+                </style>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        function confirmLogout() {
+            // Show modern loading overlay
+            document.body.innerHTML = `
+                <div style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: linear-gradient(135deg, #1e5631, #2d7a45);
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 9999;
+                    animation: fadeIn 0.3s ease;
+                ">
+                    <div style="text-align: center;">
+                        <div style="
+                            width: 120px;
+                            height: 120px;
+                            border: 8px solid rgba(255, 255, 255, 0.2);
+                            border-top-color: white;
+                            border-radius: 50%;
+                            margin: 0 auto 30px;
+                            animation: spin 1s linear infinite;
+                        "></div>
+                        <h2 style="
+                            font-size: 2.5rem;
+                            color: white;
+                            margin-bottom: 15px;
+                            font-weight: 700;
+                            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+                        ">Logging Out...</h2>
+                        <p style="
+                            font-size: 1.3rem;
+                            color: rgba(255, 255, 255, 0.9);
+                            font-weight: 500;
+                        ">Thank you for using the kiosk</p>
+                        <div style="
+                            margin-top: 30px;
+                            display: flex;
+                            gap: 8px;
+                            justify-content: center;
+                        ">
+                            <div style="width: 12px; height: 12px; background: white; border-radius: 50%; animation: bounce 1s infinite 0s;"></div>
+                            <div style="width: 12px; height: 12px; background: white; border-radius: 50%; animation: bounce 1s infinite 0.2s;"></div>
+                            <div style="width: 12px; height: 12px; background: white; border-radius: 50%; animation: bounce 1s infinite 0.4s;"></div>
+                        </div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes spin {
+                        from { transform: rotate(0deg); }
+                        to { transform: rotate(360deg); }
+                    }
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+                    @keyframes bounce {
+                        0%, 100% { transform: translateY(0); opacity: 0.4; }
+                        50% { transform: translateY(-15px); opacity: 1; }
+                    }
+                </style>
+            `;
+            setTimeout(() => {
+                window.location.href = 'logout.php';
+            }, 1500);
         }
         
         // Auto-logout after 5 minutes of inactivity
