@@ -66,7 +66,7 @@ $borrowed_items = $conn->query(
                     <a href="admin-all-transaction.php"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
                 </li>
                 <li class="nav-item">
-                    <a href="student-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
+                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
                 </li>
             </ul>
 

@@ -251,7 +251,7 @@ if ($db_connected) {
                     <a href="admin-dashboard.php#transactions"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
                 </li>
                 <li class="nav-item">
-                    <a href="student-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
+                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
                 </li>
                 <li class="nav-item active">
                     <a href="admin-inventory.php"><i class="fas fa-cog"></i><span>Manage Equipment</span></a>

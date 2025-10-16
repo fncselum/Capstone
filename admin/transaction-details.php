@@ -70,7 +70,7 @@ $count = $transaction_count ? $transaction_count->fetch_assoc()['total'] : 0;
                     <i class="fas fa-exchange-alt"></i>
                     <span>All Transactions</span>
                 </a>
-                <a href="student-activity.php" class="nav-item">
+                <a href="admin-user-activity.php" class="nav-item">
                     <i class="fas fa-users"></i>
                     <span>User Activity</span>
                 </a>

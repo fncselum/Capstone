@@ -39,8 +39,11 @@ if ($db_connected) {
 		if ($equipment_id > 0 && !empty($due_date)) {
 			$conn->begin_transaction();
 			try {
-				// Get equipment details with lock
-				$stmt = $conn->prepare("SELECT * FROM equipment WHERE id = ? FOR UPDATE");
+				// Get equipment and inventory details with lock
+				$stmt = $conn->prepare("SELECT e.*, i.available_quantity, i.borrowed_quantity, i.minimum_stock_level 
+					FROM equipment e 
+					LEFT JOIN inventory i ON e.id = i.equipment_id 
+					WHERE e.id = ? FOR UPDATE");
 				$stmt->bind_param("i", $equipment_id);
 				$stmt->execute();
 				$result = $stmt->get_result();
@@ -48,10 +51,13 @@ if ($db_connected) {
 				if ($result->num_rows === 1) {
 					$equip_data = $result->fetch_assoc();
 					$current_qty = (int)($equip_data['quantity'] ?? 0);
+					$available_qty = (int)($equip_data['available_quantity'] ?? $current_qty);
 					$equipment_name = $equip_data['name'] ?? 'Unknown';
 					$condition_before = $equip_data['item_condition'] ?? 'Good';
+					$min_stock = (int)($equip_data['minimum_stock_level'] ?? 1);
 					
-					if ($current_qty > 0) {
+					// Check if equipment is available
+					if ($available_qty > 0 && $current_qty > 0) {
 						$new_qty = $current_qty - 1;
 						
 						// Update equipment quantity
@@ -61,6 +67,30 @@ if ($db_connected) {
 						if (!$update_stmt->execute()) {
 							throw new Exception("Failed to update equipment quantity");
 						}
+						
+						// Update inventory table - decrease available_quantity, increase borrowed_quantity
+						$new_available = $available_qty - 1;
+						
+						// Determine new availability status
+						$new_status = 'Available';
+						if ($new_available == 0) {
+							$new_status = 'Out of Stock';
+						} elseif ($new_available <= $min_stock) {
+							$new_status = 'Low Stock';
+						}
+						
+						$inv_stmt = $conn->prepare("UPDATE inventory 
+							SET available_quantity = available_quantity - 1, 
+								borrowed_quantity = borrowed_quantity + 1, 
+								availability_status = ?,
+								last_updated = NOW() 
+							WHERE equipment_id = ?");
+						$inv_stmt->bind_param("si", $new_status, $equipment_id);
+						
+						if (!$inv_stmt->execute()) {
+							throw new Exception("Failed to update inventory: " . $inv_stmt->error);
+						}
+						$inv_stmt->close();
 						
 						// Insert transaction record with all required fields
 						$transaction_type = 'Borrow';
@@ -93,9 +123,16 @@ if ($db_connected) {
 							$transaction_id = $conn->insert_id;
 							$conn->commit();
 							
-							// Success message with details
+							// Success message with details and stock status
 							$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
 							$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
+							
+							// Add stock warning if applicable
+							if ($new_status == 'Out of Stock') {
+								$message .= "<br><span style='color: #ff9800;'>⚠ This was the last available item</span>";
+							} elseif ($new_status == 'Low Stock') {
+								$message .= "<br><span style='color: #ff9800;'>⚠ Low stock: $new_available remaining</span>";
+							}
 						} else {
 							throw new Exception("Failed to record transaction: " . $trans_stmt->error);
 						}
@@ -104,7 +141,11 @@ if ($db_connected) {
 						$update_stmt->close();
 					} else {
 						$conn->rollback();
-						$error = 'Sorry, this equipment is currently out of stock.';
+						if ($available_qty == 0) {
+							$error = 'Sorry, this equipment is currently out of stock. All items are borrowed or unavailable.';
+						} else {
+							$error = 'Sorry, this equipment is currently unavailable.';
+						}
 					}
 				} else {
 					$conn->rollback();
@@ -126,11 +167,13 @@ if ($db_connected) {
 		while ($row = $result->fetch_assoc()) { $categories[] = $row; }
 		$result->free();
 	}
-	// Fetch equipment with category names
-	$query = "SELECT e.*, c.name as category_name 
+	// Fetch equipment with category names and inventory status
+	$query = "SELECT e.*, c.name as category_name, 
+	          i.available_quantity, i.borrowed_quantity, i.availability_status
 	          FROM equipment e 
 	          LEFT JOIN categories c ON e.category_id = c.id 
-	          WHERE e.quantity > 0
+	          LEFT JOIN inventory i ON e.id = i.equipment_id
+	          WHERE e.quantity > 0 AND (i.available_quantity > 0 OR i.available_quantity IS NULL)
 	          ORDER BY e.id ASC";
 	if ($result = $conn->query($query)) {
 		while ($row = $result->fetch_assoc()) { $equipment_list[] = $row; }

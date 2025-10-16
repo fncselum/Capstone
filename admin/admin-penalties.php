@@ -134,7 +134,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 </li>
                 </li>
                 <li class="nav-item">
-                    <a href="student-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
+                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
                 </li>
                 <li class="nav-item">
                     <a href="admin-inventory.php"><i class="fas fa-cog"></i><span>Manage Equipment</span></a>

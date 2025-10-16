@@ -38,10 +38,12 @@ if ($db_connected) {
 		if ($transaction_id > 0) {
 			$conn->begin_transaction();
 			try {
-				// Get transaction details with lock
-				$stmt = $conn->prepare("SELECT t.*, e.name as equipment_name, e.quantity as current_qty 
+				// Get transaction and inventory details with lock
+				$stmt = $conn->prepare("SELECT t.*, e.name as equipment_name, e.quantity as current_qty,
+					i.available_quantity, i.minimum_stock_level
 					FROM transactions t 
 					JOIN equipment e ON t.equipment_id = e.id 
+					LEFT JOIN inventory i ON e.id = i.equipment_id
 					WHERE t.id = ? AND t.user_id = ? AND t.transaction_type = 'Borrow' AND t.status = 'Active' FOR UPDATE");
 				$stmt->bind_param("ii", $transaction_id, $user_id);
 				$stmt->execute();
@@ -54,6 +56,8 @@ if ($db_connected) {
 					$current_qty = (int)$transaction['current_qty'];
 					$quantity_returned = (int)$transaction['quantity'];
 					$new_qty = $current_qty + $quantity_returned;
+					$current_available = (int)($transaction['available_quantity'] ?? 0);
+					$min_stock = (int)($transaction['minimum_stock_level'] ?? 1);
 					
 					// Calculate penalty if overdue
 					$expected_return = new DateTime($transaction['expected_return_date']);
@@ -72,6 +76,48 @@ if ($db_connected) {
 					if (!$update_equip->execute()) {
 						throw new Exception("Failed to update equipment quantity");
 					}
+					
+					// Calculate new available quantity and determine status
+					$new_available = $current_available + $quantity_returned;
+					
+					// Handle damaged equipment - adjust available quantity
+					if ($condition_after === 'Damaged') {
+						$new_available = $new_available - 1; // Don't add damaged item to available
+					}
+					
+					// Determine new availability status
+					$new_status = 'Available';
+					if ($new_available == 0) {
+						$new_status = 'Out of Stock';
+					} elseif ($new_available <= $min_stock) {
+						$new_status = 'Low Stock';
+					}
+					
+					// Update inventory table
+					if ($condition_after === 'Damaged') {
+						// Return as damaged: decrease borrowed, increase damaged, update status
+						$inv_stmt = $conn->prepare("UPDATE inventory 
+							SET borrowed_quantity = borrowed_quantity - ?, 
+								damaged_quantity = damaged_quantity + 1,
+								availability_status = ?,
+								last_updated = NOW() 
+							WHERE equipment_id = ?");
+						$inv_stmt->bind_param("isi", $quantity_returned, $new_status, $equipment_id);
+					} else {
+						// Normal return: increase available, decrease borrowed, update status
+						$inv_stmt = $conn->prepare("UPDATE inventory 
+							SET available_quantity = available_quantity + ?, 
+								borrowed_quantity = borrowed_quantity - ?,
+								availability_status = ?,
+								last_updated = NOW() 
+							WHERE equipment_id = ?");
+						$inv_stmt->bind_param("iisi", $quantity_returned, $quantity_returned, $new_status, $equipment_id);
+					}
+					
+					if (!$inv_stmt->execute()) {
+						throw new Exception("Failed to update inventory: " . $inv_stmt->error);
+					}
+					$inv_stmt->close();
 					
 					// Update transaction record
 					$actual_return_date = date('Y-m-d H:i:s');

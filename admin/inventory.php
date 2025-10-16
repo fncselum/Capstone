@@ -84,7 +84,7 @@ if ($db_connected) {
 					<a href="inventory.php"><i class="fas fa-eye"></i><span>View Inventory</span></a>
 				</li>
 				<li class="nav-item">
-					<a href="student-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
+					<a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
 				</li>
 			</ul>
 			<div class="sidebar-footer">
