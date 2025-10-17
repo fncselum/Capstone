@@ -1,5 +1,6 @@
 <?php
 session_start();
+date_default_timezone_set('Asia/Manila');
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -40,10 +41,12 @@ if ($db_connected) {
 			try {
 				// Get transaction and inventory details with lock
 				$stmt = $conn->prepare("SELECT t.*, e.name as equipment_name, e.quantity as current_qty,
-					i.available_quantity, i.minimum_stock_level
+					i.available_quantity, i.minimum_stock_level,
+					i.borrowed_quantity, i.damaged_quantity, i.equipment_id AS inventory_equipment_id,
+					e.rfid_tag
 					FROM transactions t 
 					JOIN equipment e ON t.equipment_id = e.id 
-					LEFT JOIN inventory i ON e.id = i.equipment_id
+					LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
 					WHERE t.id = ? AND t.user_id = ? AND t.transaction_type = 'Borrow' AND t.status = 'Active' FOR UPDATE");
 				$stmt->bind_param("ii", $transaction_id, $user_id);
 				$stmt->execute();
@@ -55,9 +58,10 @@ if ($db_connected) {
 					$equipment_name = $transaction['equipment_name'];
 					$current_qty = (int)$transaction['current_qty'];
 					$quantity_returned = (int)$transaction['quantity'];
-					$new_qty = $current_qty + $quantity_returned;
 					$current_available = (int)($transaction['available_quantity'] ?? 0);
 					$min_stock = (int)($transaction['minimum_stock_level'] ?? 1);
+					$rfid_tag = $transaction['rfid_tag'];
+					$inventory_equipment_id = $transaction['inventory_equipment_id'];
 					
 					// Calculate penalty if overdue
 					$expected_return = new DateTime($transaction['expected_return_date']);
@@ -69,55 +73,51 @@ if ($db_connected) {
 						$penalty = $days_overdue * 10; // 10 pesos per day
 					}
 					
-					// Update equipment quantity
-					$update_equip = $conn->prepare("UPDATE equipment SET quantity = ?, updated_at = NOW() WHERE id = ?");
-					$update_equip->bind_param("ii", $new_qty, $equipment_id);
-					
-					if (!$update_equip->execute()) {
-						throw new Exception("Failed to update equipment quantity");
+					if (empty($rfid_tag) || empty($inventory_equipment_id)) {
+						throw new Exception('Inventory record missing for this equipment.');
 					}
-					
+
 					// Calculate new available quantity and determine status
 					$new_available = $current_available + $quantity_returned;
-					
-					// Handle damaged equipment - adjust available quantity
+					$new_borrowed = max(0, ((int)$transaction['borrowed_quantity']) - $quantity_returned);
+
+					// Handle damaged equipment - adjust available quantity and damaged count
 					if ($condition_after === 'Damaged') {
-						$new_available = $new_available - 1; // Don't add damaged item to available
+						$new_available = max(0, $new_available - 1);
 					}
-					
-					// Determine new availability status
+
 					$new_status = 'Available';
 					if ($new_available == 0) {
 						$new_status = 'Out of Stock';
 					} elseif ($new_available <= $min_stock) {
 						$new_status = 'Low Stock';
 					}
-					
-					// Update inventory table
+
+					// Update inventory table using RFID tag
 					if ($condition_after === 'Damaged') {
-						// Return as damaged: decrease borrowed, increase damaged, update status
 						$inv_stmt = $conn->prepare("UPDATE inventory 
-							SET borrowed_quantity = borrowed_quantity - ?, 
+							SET borrowed_quantity = GREATEST(borrowed_quantity - ?, 0),
 								damaged_quantity = damaged_quantity + 1,
 								availability_status = ?,
-								last_updated = NOW() 
+								last_updated = NOW()
 							WHERE equipment_id = ?");
-						$inv_stmt->bind_param("isi", $quantity_returned, $new_status, $equipment_id);
+						$inv_stmt->bind_param("iss", $quantity_returned, $new_status, $rfid_tag);
 					} else {
-						// Normal return: increase available, decrease borrowed, update status
 						$inv_stmt = $conn->prepare("UPDATE inventory 
-							SET available_quantity = available_quantity + ?, 
-								borrowed_quantity = borrowed_quantity - ?,
+							SET available_quantity = available_quantity + ?,
+								borrowed_quantity = GREATEST(borrowed_quantity - ?, 0),
 								availability_status = ?,
-								last_updated = NOW() 
+								last_updated = NOW()
 							WHERE equipment_id = ?");
-						$inv_stmt->bind_param("iisi", $quantity_returned, $quantity_returned, $new_status, $equipment_id);
+						$inv_stmt->bind_param("iiss", $quantity_returned, $quantity_returned, $new_status, $rfid_tag);
 					}
-					
-					if (!$inv_stmt->execute()) {
+
+					if (!$inv_stmt->execute() || $inv_stmt->affected_rows !== 1) {
 						throw new Exception("Failed to update inventory: " . $inv_stmt->error);
 					}
 					$inv_stmt->close();
+
+					// Equipment table already reflects total quantity; inventory handles availability tracking.
 					
 					// Update transaction record
 					$actual_return_date = date('Y-m-d H:i:s');
@@ -163,7 +163,6 @@ if ($db_connected) {
 					}
 					
 					$update_trans->close();
-					$update_equip->close();
 				} else {
 					$conn->rollback();
 					$error = 'Transaction not found or already returned.';

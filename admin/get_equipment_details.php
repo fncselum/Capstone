@@ -30,12 +30,12 @@ try {
     // Fetch equipment details with category and inventory info
     $sql = "SELECT e.id, e.name, e.rfid_tag, e.category_id, e.quantity, e.description, e.image_path,
             c.name as category_name,
-            i.quantity as inventory_quantity,
-            i.available_quantity,
+            i.borrowed_quantity,
+            GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available,
             i.item_condition
             FROM equipment e
             LEFT JOIN categories c ON e.category_id = c.id
-            LEFT JOIN inventory i ON e.id = i.equipment_id
+            LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
             WHERE e.id = :id
             LIMIT 1";
     
@@ -44,9 +44,11 @@ try {
     $equipment = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if ($equipment) {
-        // Use equipment quantity if inventory quantity is not available
-        if ($equipment['quantity'] === null && $equipment['inventory_quantity'] !== null) {
-            $equipment['quantity'] = $equipment['inventory_quantity'];
+        // Ensure computed availability is present
+        if (!isset($equipment['computed_available'])) {
+            $borrowed = isset($equipment['borrowed_quantity']) ? (int)$equipment['borrowed_quantity'] : 0;
+            $qty = isset($equipment['quantity']) ? (int)$equipment['quantity'] : 0;
+            $equipment['computed_available'] = max($qty - $borrowed, 0);
         }
         
         echo json_encode([

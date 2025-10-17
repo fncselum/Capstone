@@ -103,17 +103,18 @@ if (!in_array($stock_filter, $allowed_filters)) {
 
 // Build SQL query with stock filter
 $sql = "SELECT e.*, c.name as category_name, 
-        COALESCE(e.quantity, i.quantity, 0) as quantity,
-        i.available_quantity, i.item_condition, i.availability_status, i.minimum_stock_level
+        e.quantity as quantity,
+        i.borrowed_quantity, i.item_condition, i.availability_status, i.minimum_stock_level,
+        GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available
         FROM equipment e 
         LEFT JOIN categories c ON e.category_id = c.id 
-        LEFT JOIN inventory i ON e.id = i.equipment_id";
+        LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id";
 
 // Add WHERE clause for stock filtering
 if ($stock_filter === 'available') {
-    $sql .= " WHERE i.availability_status = 'Available'";
+    $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) > 0";
 } elseif ($stock_filter === 'out_of_stock') {
-    $sql .= " WHERE i.availability_status = 'Out of Stock'";
+    $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) = 0";
 }
 
 $sql .= " ORDER BY e.name";
@@ -260,13 +261,16 @@ $hasEquipment = !empty($equipment_items);
                                         <div class="equipment-id">#<?= htmlspecialchars($row['id']) ?></div>
                                         <h3 class="equipment-name"> <?= htmlspecialchars($row['name']) ?></h3>
                                         <?php 
-                                            $available_qty = $row['available_quantity'] ?? $row['quantity'] ?? 0;
+                                            // Always display quantity from equipment table
+                                            $equipment_qty = $row['quantity'] ?? 0;
+                                            // Compute available from quantity - borrowed
+                                            $computed_available = max(($row['quantity'] ?? 0) - ($row['borrowed_quantity'] ?? 0), 0);
                                             $min_stock = $row['minimum_stock_level'] ?? 1;
-                                            $is_out_of_stock = ($available_qty == 0);
-                                            $is_low_stock = ($available_qty > 0 && $available_qty <= $min_stock);
+                                            $is_out_of_stock = ($computed_available == 0);
+                                            $is_low_stock = ($computed_available > 0 && $computed_available <= $min_stock);
                                         ?>
                                         <div class="equipment-qty">
-                                            Quantity: <?= htmlspecialchars($available_qty) ?>
+                                            Quantity: <?= htmlspecialchars($equipment_qty) ?>
                                             <?php if ($is_out_of_stock): ?>
                                                 <span class="stock-badge out-of-stock">Out of Stock</span>
                                             <?php elseif ($is_low_stock): ?>
@@ -526,6 +530,13 @@ $hasEquipment = !empty($equipment_items);
                 .then(data => {
                     if (data.success) {
                         const equipment = data.equipment;
+                        const availableQty = (equipment.available_quantity !== undefined && equipment.available_quantity !== null)
+                            ? equipment.available_quantity
+                            : (equipment.computed_available !== undefined ? equipment.computed_available : null);
+                        const borrowedQty = (equipment.borrowed_quantity !== undefined && equipment.borrowed_quantity !== null)
+                            ? equipment.borrowed_quantity
+                            : null;
+
                         content.innerHTML = `
                             <div class="equipment-details">
                                 ${equipment.image_path ? `
@@ -556,10 +567,16 @@ $hasEquipment = !empty($equipment_items);
                                         <span class="detail-label">Quantity:</span>
                                         <span class="detail-value">${equipment.quantity || 0}</span>
                                     </div>
-                                    ${equipment.available_quantity !== null ? `
+                                    ${availableQty !== null ? `
                                         <div class="detail-row">
                                             <span class="detail-label">Available:</span>
-                                            <span class="detail-value">${equipment.available_quantity}</span>
+                                            <span class="detail-value">${availableQty}</span>
+                                        </div>
+                                    ` : ''}
+                                    ${borrowedQty !== null ? `
+                                        <div class="detail-row">
+                                            <span class="detail-label">Borrowed:</span>
+                                            <span class="detail-value">${borrowedQty}</span>
                                         </div>
                                     ` : ''}
                                     ${equipment.description ? `

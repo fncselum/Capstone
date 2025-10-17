@@ -1,5 +1,6 @@
 <?php
 session_start();
+date_default_timezone_set('Asia/Manila');
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
@@ -40,62 +41,43 @@ if ($db_connected) {
 			$conn->begin_transaction();
 			try {
 				// Get equipment and inventory details with lock
-				$stmt = $conn->prepare("SELECT e.*, i.available_quantity, i.borrowed_quantity, i.minimum_stock_level 
-					FROM equipment e 
-					LEFT JOIN inventory i ON e.id = i.equipment_id 
-					WHERE e.id = ? FOR UPDATE");
+				$stmt = $conn->prepare("SELECT e.*, 
+					i.quantity AS inventory_quantity,
+					i.available_quantity,
+					i.borrowed_quantity,
+					i.damaged_quantity,
+					i.minimum_stock_level,
+					i.availability_status,
+					i.equipment_id AS inventory_equipment_id
+				FROM equipment e 
+				LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id 
+				WHERE e.id = ? FOR UPDATE");
 				$stmt->bind_param("i", $equipment_id);
 				$stmt->execute();
 				$result = $stmt->get_result();
 				
 				if ($result->num_rows === 1) {
 					$equip_data = $result->fetch_assoc();
-					$current_qty = (int)($equip_data['quantity'] ?? 0);
-					$available_qty = (int)($equip_data['available_quantity'] ?? $current_qty);
+					$total_qty = (int)($equip_data['inventory_quantity'] ?? $equip_data['quantity'] ?? 0);
+					$borrowed_qty = (int)($equip_data['borrowed_quantity'] ?? 0);
+					$damaged_qty = (int)($equip_data['damaged_quantity'] ?? 0);
+					$available_qty = $equip_data['available_quantity'] !== null
+						? (int)$equip_data['available_quantity']
+						: max($total_qty - $borrowed_qty - $damaged_qty, 0);
 					$equipment_name = $equip_data['name'] ?? 'Unknown';
 					$condition_before = $equip_data['item_condition'] ?? 'Good';
 					$min_stock = (int)($equip_data['minimum_stock_level'] ?? 1);
+					$rfid_code = $equip_data['rfid_tag'] ?? '';
+					$inventory_equipment_id = $equip_data['inventory_equipment_id'] ?? null;
 					
-					// Check if equipment is available
-					if ($available_qty > 0 && $current_qty > 0) {
-						$new_qty = $current_qty - 1;
-						
-						// Update equipment quantity
-						$update_stmt = $conn->prepare("UPDATE equipment SET quantity = ?, updated_at = NOW() WHERE id = ?");
-						$update_stmt->bind_param("ii", $new_qty, $equipment_id);
-						
-						if (!$update_stmt->execute()) {
-							throw new Exception("Failed to update equipment quantity");
-						}
-						
-						// Update inventory table - decrease available_quantity, increase borrowed_quantity
-						$new_available = $available_qty - 1;
-						
-						// Determine new availability status
-						$new_status = 'Available';
-						if ($new_available == 0) {
-							$new_status = 'Out of Stock';
-						} elseif ($new_available <= $min_stock) {
-							$new_status = 'Low Stock';
-						}
-						
-						$inv_stmt = $conn->prepare("UPDATE inventory 
-							SET available_quantity = available_quantity - 1, 
-								borrowed_quantity = borrowed_quantity + 1, 
-								availability_status = ?,
-								last_updated = NOW() 
-							WHERE equipment_id = ?");
-						$inv_stmt->bind_param("si", $new_status, $equipment_id);
-						
-						if (!$inv_stmt->execute()) {
-							throw new Exception("Failed to update inventory: " . $inv_stmt->error);
-						}
-						$inv_stmt->close();
-						
+					// Ensure inventory record exists and item is available
+					if (empty($rfid_code) || empty($inventory_equipment_id)) {
+						$conn->rollback();
+						$error = 'Unable to locate inventory record for this equipment. Please contact the administrator.';
+					} elseif ($available_qty > 0 && $total_qty > 0) {
 						// Insert transaction record with all required fields
 						$transaction_type = 'Borrow';
 						$quantity = 1; // Borrowing 1 item at a time
-						$transaction_date = date('Y-m-d H:i:s');
 						$expected_return_date = date('Y-m-d H:i:s', strtotime($due_date));
 						$status = 'Active';
 						$penalty_applied = 0;
@@ -104,14 +86,13 @@ if ($db_connected) {
 						$trans_stmt = $conn->prepare("INSERT INTO transactions 
 							(user_id, equipment_id, transaction_type, quantity, transaction_date, 
 							expected_return_date, condition_before, status, penalty_applied, notes, created_at, updated_at) 
-							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
+							VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, NOW(), NOW())");
 						
-						$trans_stmt->bind_param("iisiisssis", 
+						$trans_stmt->bind_param("iisisssis", 
 							$user_id, 
 							$equipment_id, 
 							$transaction_type, 
 							$quantity,
-							$transaction_date, 
 							$expected_return_date, 
 							$condition_before,
 							$status,
@@ -121,31 +102,59 @@ if ($db_connected) {
 						
 						if ($trans_stmt->execute()) {
 							$transaction_id = $conn->insert_id;
+
+							$inv_update = $conn->prepare("UPDATE inventory 
+								SET available_quantity = available_quantity - 1,
+									borrowed_quantity = borrowed_quantity + 1,
+									availability_status = CASE
+										WHEN (available_quantity - 1) <= 0 THEN 'Out of Stock'
+										WHEN (available_quantity - 1) <= IFNULL(minimum_stock_level, 1) THEN 'Low Stock'
+										ELSE 'Available'
+									END,
+									last_updated = NOW()
+								WHERE equipment_id = ? AND available_quantity > 0");
+							$inv_update->bind_param("s", $rfid_code);
+							
+							if (!$inv_update->execute() || $inv_update->affected_rows !== 1) {
+								throw new Exception('Failed to update inventory. Item may be out of stock.');
+							}
+							$inv_update->close();
+
+							// Fetch updated inventory status for message display
+							$inv_stmt = $conn->prepare("SELECT available_quantity, borrowed_quantity, availability_status FROM inventory WHERE equipment_id = ? LIMIT 1");
+							$inv_stmt->bind_param("s", $rfid_code);
+							$inv_stmt->execute();
+							$inv_result = $inv_stmt->get_result();
+							$inv_data = $inv_result ? $inv_result->fetch_assoc() : null;
+							$inv_stmt->close();
+							
+							if (!$inv_data) {
+								throw new Exception('Inventory record missing after update.');
+							}
+
+							$new_available = (int)$inv_data['available_quantity'];
+							$new_status = $inv_data['availability_status'];
+
 							$conn->commit();
 							
-							// Success message with details and stock status
 							$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
 							$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
 							
-							// Add stock warning if applicable
-							if ($new_status == 'Out of Stock') {
+							if ($new_available <= 0) {
 								$message .= "<br><span style='color: #ff9800;'>⚠ This was the last available item</span>";
-							} elseif ($new_status == 'Low Stock') {
+							} elseif ($new_available <= $min_stock) {
 								$message .= "<br><span style='color: #ff9800;'>⚠ Low stock: $new_available remaining</span>";
+							} else {
+								$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
 							}
 						} else {
 							throw new Exception("Failed to record transaction: " . $trans_stmt->error);
 						}
 						
 						$trans_stmt->close();
-						$update_stmt->close();
 					} else {
 						$conn->rollback();
-						if ($available_qty == 0) {
-							$error = 'Sorry, this equipment is currently out of stock. All items are borrowed or unavailable.';
-						} else {
-							$error = 'Sorry, this equipment is currently unavailable.';
-						}
+						$error = 'Sorry, this equipment is currently out of stock. All items are borrowed or unavailable.';
 					}
 				} else {
 					$conn->rollback();
@@ -168,12 +177,23 @@ if ($db_connected) {
 		$result->free();
 	}
 	// Fetch equipment with category names and inventory status
-	$query = "SELECT e.*, c.name as category_name, 
-	          i.available_quantity, i.borrowed_quantity, i.availability_status
+	$query = "SELECT e.*, 
+	          c.name as category_name,
+	          i.quantity AS inventory_quantity,
+	          i.available_quantity,
+	          i.borrowed_quantity,
+	          i.damaged_quantity,
+	          i.availability_status,
+	          COALESCE(i.available_quantity,
+	              GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0)
+	          ) AS computed_available
 	          FROM equipment e 
 	          LEFT JOIN categories c ON e.category_id = c.id 
-	          LEFT JOIN inventory i ON e.id = i.equipment_id
-	          WHERE e.quantity > 0 AND (i.available_quantity > 0 OR i.available_quantity IS NULL)
+	          LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
+	          WHERE e.quantity > 0 AND (
+	              (i.available_quantity IS NOT NULL AND i.available_quantity > 0)
+	              OR (i.available_quantity IS NULL AND GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0) > 0)
+	          )
 	          ORDER BY e.id ASC";
 	if ($result = $conn->query($query)) {
 		while ($row = $result->fetch_assoc()) { $equipment_list[] = $row; }
@@ -296,7 +316,7 @@ if ($db_connected) {
 					<?php foreach($equipment_list as $item): 
 								$condition = strtolower(str_replace(' ', '-', $item['item_condition'] ?? ''));
 								$categoryKey = strtolower($item['category_name'] ?? '');
-								$qty = (int)($item['quantity'] ?? 0);
+								$availableQty = (int)($item['computed_available'] ?? $item['available_quantity'] ?? 0);
 							?>
 					<div class="equip-card" 
 						data-name="<?= htmlspecialchars(strtolower($item['name'])) ?>" 
@@ -327,11 +347,11 @@ if ($db_connected) {
 							</p>
 							<div class="equip-qty">
 								<i class="fas fa-boxes"></i> 
-								<span><?= $qty ?> available</span>
+								<span><?= $availableQty ?> available</span>
 							</div>
 						</div>
 						
-						<button class="borrow-btn" onclick="openBorrowModal(<?= (int)$item['id'] ?>, '<?= addslashes(htmlspecialchars($item['name'])) ?>', <?= $qty ?>, '<?= addslashes(htmlspecialchars($item['image_path'] ?? '')) ?>')">
+						<button class="borrow-btn" onclick="openBorrowModal(<?= (int)$item['id'] ?>, '<?= addslashes(htmlspecialchars($item['name'])) ?>', <?= $availableQty ?>, '<?= addslashes(htmlspecialchars($item['image_path'] ?? '')) ?>')">
 							<i class="fas fa-hand-holding"></i> Borrow
 						</button>
 					</div>
@@ -539,7 +559,10 @@ if ($db_connected) {
 		let html = '';
 		equipmentList.forEach(item => {
 			const categoryKey = (item.category_name || '').toLowerCase();
-			const qty = parseInt(item.quantity) || 0;
+			const availableQty = parseInt(item.computed_available ?? item.available_quantity ?? 0) || 0;
+			if (availableQty <= 0) {
+				return;
+			}
 			
 			// Handle image path
 			let imageSrc = item.image_path || '';
@@ -573,11 +596,11 @@ if ($db_connected) {
 						</p>
 						<div class="equip-qty">
 							<i class="fas fa-boxes"></i> 
-							<span>${qty} available</span>
+							<span>${availableQty} available</span>
 						</div>
 					</div>
 					
-					<button class="borrow-btn" onclick="openBorrowModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', ${qty}, '${(imageSrc || '').replace(/'/g, "\\'")}')">
+					<button class="borrow-btn" onclick="openBorrowModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', ${availableQty}, '${(imageSrc || '').replace(/'/g, "\\'")}')">
 						<i class="fas fa-hand-holding"></i> Borrow
 					</button>
 				</div>

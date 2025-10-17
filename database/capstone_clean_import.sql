@@ -56,6 +56,7 @@ CREATE TABLE `equipment` (
   `name` varchar(200) NOT NULL,
   `rfid_tag` varchar(50) DEFAULT NULL,
   `category_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL DEFAULT 0,
   `description` text DEFAULT NULL,
   `image_path` varchar(500) DEFAULT NULL,
   `image_url` varchar(500) DEFAULT NULL,
@@ -73,7 +74,7 @@ CREATE TABLE `equipment` (
 -- This table tracks equipment inventory, quantities, conditions, and availability
 CREATE TABLE `inventory` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `equipment_id` int(11) NOT NULL,
+  `equipment_id` varchar(50) NOT NULL, -- stores RFID tag
   `quantity` int(11) NOT NULL DEFAULT 0,
   `available_quantity` int(11) NOT NULL DEFAULT 0,
   `borrowed_quantity` int(11) NOT NULL DEFAULT 0,
@@ -87,7 +88,7 @@ CREATE TABLE `inventory` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `equipment_id` (`equipment_id`),
-  CONSTRAINT `fk_inventory_equipment` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT `fk_inventory_equipment_rfid` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`rfid_tag`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -179,17 +180,21 @@ SELECT
     e.description,
     e.image_path,
     e.image_url,
-    i.quantity,
-    i.available_quantity,
-    i.borrowed_quantity,
-    i.damaged_quantity,
+    e.quantity,
+    COALESCE(i.borrowed_quantity, 0) AS borrowed_quantity,
+    GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS available_quantity,
+    COALESCE(i.damaged_quantity, 0) AS damaged_quantity,
     i.item_condition,
-    i.availability_status,
+    CASE 
+        WHEN GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) <= 0 THEN 'Out of Stock'
+        WHEN GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) < e.quantity THEN 'Partially Available'
+        ELSE 'Available'
+    END AS availability_status,
     i.location,
     e.created_at
 FROM equipment e
 LEFT JOIN categories c ON e.category_id = c.id
-LEFT JOIN inventory i ON e.id = i.equipment_id;
+LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id;
 
 -- View for active transactions
 CREATE VIEW `active_transactions_view` AS

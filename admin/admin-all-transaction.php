@@ -1,5 +1,6 @@
 <?php
 session_start();
+date_default_timezone_set('Asia/Manila');
 
 // Simple authentication check
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
@@ -54,6 +55,7 @@ if ($users_table_exists) {
     }
     
     $query = "SELECT t.*, 
+                COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                 e.name as equipment_name,
                 $user_name_col
                 $student_id_col
@@ -64,6 +66,7 @@ if ($users_table_exists) {
 } else {
     // Fallback if users table doesn't exist - use rfid_id from transactions
     $query = "SELECT t.*, 
+                COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                 e.name as equipment_name,
                 t.rfid_id as student_id
          FROM transactions t
@@ -311,7 +314,13 @@ if (!$all_transactions) {
                                         <?= isset($row['quantity']) ? htmlspecialchars($row['quantity']) : '1' ?>
                                     </span>
                                 </td>
-                                <td><?= date('M j, Y g:i A', strtotime($row['transaction_date'])) ?></td>
+                                <td>
+                                    <?php if (!empty($row['txn_datetime'])): ?>
+                                        <?= date('M j, Y g:i A', strtotime($row['txn_datetime'])) ?>
+                                    <?php else: ?>
+                                        <span style="color:#999;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <?php if (!empty($row['expected_return_date'])): ?>
                                         <?= date('M j, Y g:i A', strtotime($row['expected_return_date'])) ?>

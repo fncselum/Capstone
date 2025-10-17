@@ -20,11 +20,21 @@ if ($conn->connect_error) {
     exit;
 }
 
-// Fetch equipment with category names
+// Fetch equipment with category names and inventory info
 $equipment_list = [];
-$query = "SELECT e.*, c.name as category_name 
+$query = "SELECT e.*, 
+                 c.name AS category_name,
+                 i.quantity AS inventory_quantity,
+                 i.available_quantity,
+                 i.borrowed_quantity,
+                 i.damaged_quantity,
+                 i.availability_status,
+                 COALESCE(i.available_quantity,
+                          GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0)
+                 ) AS computed_available
           FROM equipment e 
           LEFT JOIN categories c ON e.category_id = c.id 
+          LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
           WHERE e.quantity > 0
           ORDER BY e.id ASC";
 

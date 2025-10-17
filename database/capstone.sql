@@ -55,6 +55,7 @@ CREATE TABLE `equipment` (
   `name` varchar(200) NOT NULL,
   `rfid_tag` varchar(50) DEFAULT NULL,
   `category_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL DEFAULT 0,
   `description` text DEFAULT NULL,
   `image_path` varchar(500) DEFAULT NULL,
   `image_url` varchar(500) DEFAULT NULL,
@@ -78,7 +79,7 @@ CREATE TABLE `equipment` (
 -- This table tracks equipment inventory, quantities, conditions, and availability
 CREATE TABLE `inventory` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `equipment_id` int(11) NOT NULL,
+  `equipment_id` varchar(50) NOT NULL, -- stores RFID tag
   `quantity` int(11) NOT NULL DEFAULT 0,
   `available_quantity` int(11) NOT NULL DEFAULT 0,
   `borrowed_quantity` int(11) NOT NULL DEFAULT 0,
@@ -92,7 +93,7 @@ CREATE TABLE `inventory` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `equipment_id` (`equipment_id`),
-  CONSTRAINT `fk_inventory_equipment` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT `fk_inventory_equipment_rfid` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`rfid_tag`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -186,14 +187,14 @@ BEGIN
     IF NEW.transaction_type = 'Borrow' THEN
         UPDATE `inventory` 
         SET 
-            `available_quantity` = `available_quantity` - NEW.quantity,
             `borrowed_quantity` = `borrowed_quantity` + NEW.quantity,
+            `available_quantity` = GREATEST(`quantity` - (`borrowed_quantity` + NEW.quantity), 0),
             `availability_status` = CASE 
-                WHEN (`available_quantity` - NEW.quantity) <= 0 THEN 'Out of Stock'
-                WHEN (`available_quantity` - NEW.quantity) < `quantity` THEN 'Partially Available'
+                WHEN (GREATEST(`quantity` - (`borrowed_quantity` + NEW.quantity), 0)) <= 0 THEN 'Out of Stock'
+                WHEN (GREATEST(`quantity` - (`borrowed_quantity` + NEW.quantity), 0)) < `quantity` THEN 'Partially Available'
                 ELSE 'Available'
             END
-        WHERE `equipment_id` = NEW.equipment_id;
+        WHERE `equipment_id` = (SELECT `rfid_tag` FROM `equipment` WHERE `id` = NEW.equipment_id LIMIT 1);
     END IF;
 END$$
 
@@ -204,14 +205,14 @@ BEGIN
     IF OLD.status != 'Returned' AND NEW.status = 'Returned' THEN
         UPDATE `inventory` 
         SET 
-            `available_quantity` = `available_quantity` + NEW.quantity,
             `borrowed_quantity` = `borrowed_quantity` - NEW.quantity,
+            `available_quantity` = GREATEST(`quantity` - GREATEST(`borrowed_quantity` - NEW.quantity, 0), 0),
             `availability_status` = CASE 
-                WHEN (`available_quantity` + NEW.quantity) >= `quantity` THEN 'Available'
-                WHEN (`available_quantity` + NEW.quantity) > 0 THEN 'Partially Available'
+                WHEN (GREATEST(`quantity` - GREATEST(`borrowed_quantity` - NEW.quantity, 0), 0)) >= `quantity` THEN 'Available'
+                WHEN (GREATEST(`quantity` - GREATEST(`borrowed_quantity` - NEW.quantity, 0), 0)) > 0 THEN 'Partially Available'
                 ELSE 'Out of Stock'
             END
-        WHERE `equipment_id` = NEW.equipment_id;
+        WHERE `equipment_id` = (SELECT `rfid_tag` FROM `equipment` WHERE `id` = NEW.equipment_id LIMIT 1);
     END IF;
 END$$
 
@@ -231,17 +232,21 @@ SELECT
     e.description,
     e.image_path,
     e.image_url,
-    i.quantity,
-    i.available_quantity,
-    i.borrowed_quantity,
-    i.damaged_quantity,
+    e.quantity,
+    COALESCE(i.borrowed_quantity, 0) AS borrowed_quantity,
+    GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS available_quantity,
+    COALESCE(i.damaged_quantity, 0) AS damaged_quantity,
     i.item_condition,
-    i.availability_status,
+    CASE 
+        WHEN GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) <= 0 THEN 'Out of Stock'
+        WHEN GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) < e.quantity THEN 'Partially Available'
+        ELSE 'Available'
+    END AS availability_status,
     i.location,
     e.created_at
 FROM equipment e
 LEFT JOIN categories c ON e.category_id = c.id
-LEFT JOIN inventory i ON e.id = i.equipment_id;
+LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id;
 
 -- View for active transactions
 CREATE VIEW `active_transactions_view` AS
@@ -283,11 +288,19 @@ INSERT INTO `equipment` (`name`, `rfid_tag`, `category_id`, `description`, `bran
 
 -- Sample inventory
 INSERT INTO `inventory` (`equipment_id`, `quantity`, `available_quantity`, `item_condition`, `location`) VALUES
-(1, 10, 10, 'Good', 'Sports Equipment Room'),
-(2, 5, 5, 'Excellent', 'Science Laboratory'),
-(3, 15, 15, 'Good', 'IT Equipment Room'),
-(4, 8, 8, 'Good', 'Audio Visual Room'),
-(5, 20, 20, 'Excellent', 'Mathematics Department');
+('EQ001234567890', 10, 10, 'Good', 'Sports Equipment Room'),
+('EQ001234567891', 5, 5, 'Excellent', 'Science Laboratory'),
+('EQ001234567892', 15, 15, 'Good', 'IT Equipment Room'),
+('EQ001234567893', 8, 8, 'Good', 'Audio Visual Room'),
+('EQ001234567894', 20, 20, 'Excellent', 'Mathematics Department');
+
+-- Migration to convert existing inventory rows (if coming from old schema)
+-- 1) Set inventory.equipment_id to the RFID tag
+UPDATE `inventory` i
+JOIN `equipment` e ON e.id = CAST(i.equipment_id AS UNSIGNED)
+SET i.equipment_id = e.rfid_tag,
+    i.quantity = e.quantity,
+    i.available_quantity = GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0);
 
 -- --------------------------------------------------------
 
