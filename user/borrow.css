@@ -577,24 +577,79 @@ body {
 
 .modal-equip-info-left {
 	text-align: center;
+	margin-top: 20px;
 }
 
 .modal-equip-info-left h3 {
-	margin: 0 0 10px 0;
-	font-size: 1.4rem;
-	color: #333;
-	font-weight: 700;
+	font-size: 1.6rem;
+	margin-bottom: 10px;
+	color: #1e5631;
 }
 
 .modal-qty {
-	margin: 0;
-	color: #1e5631;
+	font-size: 0.95rem;
+	color: #4a4a4a;
+	margin-bottom: 12px;
+}
+
+.quantity-spinner {
+	display: flex;
+	align-items: center;
+	border: 1px solid #d6e2db;
+	border-radius: 10px;
+	background: #f7faf8;
+	overflow: hidden;
+}
+
+.quantity-label {
+	font-size: 0.95rem;
 	font-weight: 600;
+	color: #214d30;
+}
+
+.quantity-number {
+	min-width: 52px;
+	text-align: center;
+	font-size: 1.1rem;
+	font-weight: 600;
+	color: #1e5631;
+	padding: 0 10px;
+}
+
+.quantity-btn {
+	width: 40px;
+	height: 40px;
+	background: transparent;
+	color: #1e5631;
+	border: none;
 	font-size: 1rem;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.quantity-btn:not(:disabled):hover {
+	background: #e4ede8;
+}
+
+.quantity-btn:disabled {
+	color: #9cb4a3;
+	cursor: default;
+}
+
+.quantity-control {
+	margin-top: 16px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
 	gap: 8px;
+}
+
+.quantity-hint {
+	color: #6c8577;
+	font-size: 0.8rem;
 }
 
 /* Right Side - Form */

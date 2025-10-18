@@ -36,6 +36,10 @@ if ($db_connected) {
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'borrow') {
 		$equipment_id = (int)($_POST['equipment_id'] ?? 0);
 		$due_date = trim($_POST['due_date'] ?? '');
+		$requested_qty = (int)($_POST['quantity'] ?? 1);
+		if ($requested_qty <= 0) {
+			$requested_qty = 1;
+		}
 		
 		if ($equipment_id > 0 && !empty($due_date)) {
 			$conn->begin_transaction();
@@ -75,83 +79,89 @@ if ($db_connected) {
 						$conn->rollback();
 						$error = 'Unable to locate inventory record for this equipment. Please contact the administrator.';
 					} elseif ($available_qty > 0 && $total_qty > 0) {
-						// Insert transaction record with all required fields
-						$transaction_type = 'Borrow';
-						$quantity = 1; // Borrowing 1 item at a time
-						$expected_return_date = date('Y-m-d H:i:s', strtotime($due_date));
-						$status = 'Active';
-						$penalty_applied = 0;
-						$notes = "Borrowed via kiosk by student ID: " . $student_id;
-						
-						$trans_stmt = $conn->prepare("INSERT INTO transactions 
-							(user_id, equipment_id, transaction_type, quantity, transaction_date, 
-							expected_return_date, condition_before, status, penalty_applied, notes, created_at, updated_at) 
-							VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, NOW(), NOW())");
-						
-						$trans_stmt->bind_param("iisisssis", 
-							$user_id, 
-							$equipment_id, 
-							$transaction_type, 
-							$quantity,
-							$expected_return_date, 
-							$condition_before,
-							$status,
-							$penalty_applied,
-							$notes
-						);
-						
-						if ($trans_stmt->execute()) {
-							$transaction_id = $conn->insert_id;
-
-							$inv_update = $conn->prepare("UPDATE inventory 
-								SET available_quantity = available_quantity - 1,
-									borrowed_quantity = borrowed_quantity + 1,
-									availability_status = CASE
-										WHEN (available_quantity - 1) <= 0 THEN 'Out of Stock'
-										WHEN (available_quantity - 1) <= IFNULL(minimum_stock_level, 1) THEN 'Low Stock'
-										ELSE 'Available'
-									END,
-									last_updated = NOW()
-								WHERE equipment_id = ? AND available_quantity > 0");
-							$inv_update->bind_param("s", $rfid_code);
-							
-							if (!$inv_update->execute() || $inv_update->affected_rows !== 1) {
-								throw new Exception('Failed to update inventory. Item may be out of stock.');
-							}
-							$inv_update->close();
-
-							// Fetch updated inventory status for message display
-							$inv_stmt = $conn->prepare("SELECT available_quantity, borrowed_quantity, availability_status FROM inventory WHERE equipment_id = ? LIMIT 1");
-							$inv_stmt->bind_param("s", $rfid_code);
-							$inv_stmt->execute();
-							$inv_result = $inv_stmt->get_result();
-							$inv_data = $inv_result ? $inv_result->fetch_assoc() : null;
-							$inv_stmt->close();
-							
-							if (!$inv_data) {
-								throw new Exception('Inventory record missing after update.');
-							}
-
-							$new_available = (int)$inv_data['available_quantity'];
-							$new_status = $inv_data['availability_status'];
-
-							$conn->commit();
-							
-							$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
-							$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
-							
-							if ($new_available <= 0) {
-								$message .= "<br><span style='color: #ff9800;'>⚠ This was the last available item</span>";
-							} elseif ($new_available <= $min_stock) {
-								$message .= "<br><span style='color: #ff9800;'>⚠ Low stock: $new_available remaining</span>";
-							} else {
-								$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
-							}
+						if ($requested_qty > $available_qty) {
+							$conn->rollback();
+							$error = 'Unable to borrow that many items. Only ' . $available_qty . ' available at the moment.';
 						} else {
-							throw new Exception("Failed to record transaction: " . $trans_stmt->error);
+							// Insert transaction record with all required fields
+							$transaction_type = 'Borrow';
+							$quantity = $requested_qty;
+							$expected_return_date = date('Y-m-d H:i:s', strtotime($due_date));
+							$status = 'Active';
+							$penalty_applied = 0;
+							$notes = "Borrowed via kiosk by student ID: " . $student_id;
+							
+							$trans_stmt = $conn->prepare("INSERT INTO transactions 
+								(user_id, equipment_id, transaction_type, quantity, transaction_date, 
+								expected_return_date, condition_before, status, penalty_applied, notes, created_at, updated_at) 
+								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, NOW(), NOW())");
+							
+							$trans_stmt->bind_param("iisisssis", 
+								$user_id, 
+								$equipment_id, 
+								$transaction_type, 
+								$quantity,
+								$expected_return_date, 
+								$condition_before,
+								$status,
+								$penalty_applied,
+								$notes
+							);
+							
+							if ($trans_stmt->execute()) {
+								$transaction_id = $conn->insert_id;
+
+								$inv_update = $conn->prepare("UPDATE inventory 
+									SET available_quantity = available_quantity - ?,
+										borrowed_quantity = borrowed_quantity + ?,
+										availability_status = CASE
+											WHEN (available_quantity - ?) <= 0 THEN 'Out of Stock'
+											WHEN (available_quantity - ?) <= IFNULL(minimum_stock_level, 1) THEN 'Low Stock'
+											ELSE 'Available'
+										END,
+										last_updated = NOW()
+									WHERE equipment_id = ? AND available_quantity >= ?");
+								$inv_update->bind_param("iiiisi", $quantity, $quantity, $quantity, $quantity, $rfid_code, $quantity);
+									
+								if (!$inv_update->execute() || $inv_update->affected_rows !== 1) {
+									throw new Exception('Failed to update inventory. Item may be out of stock.');
+								}
+								$inv_update->close();
+
+								// Fetch updated inventory status for message display
+								$inv_stmt = $conn->prepare("SELECT available_quantity, borrowed_quantity, availability_status FROM inventory WHERE equipment_id = ? LIMIT 1");
+								$inv_stmt->bind_param("s", $rfid_code);
+								$inv_stmt->execute();
+								$inv_result = $inv_stmt->get_result();
+								$inv_data = $inv_result ? $inv_result->fetch_assoc() : null;
+								$inv_stmt->close();
+								
+								if (!$inv_data) {
+									throw new Exception('Inventory record missing after update.');
+								}
+
+								$new_available = (int)$inv_data['available_quantity'];
+								$new_status = $inv_data['availability_status'];
+
+								$conn->commit();
+								
+								$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
+								$quantity_phrase = $quantity . ' ' . ($quantity === 1 ? 'item' : 'items');
+								$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Borrowed: $quantity_phrase<br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
+								
+								if ($new_available <= 0) {
+									$message .= "<br><span style='color: #ff9800;'>⚠ This was the last available item</span>";
+								} elseif ($new_available <= $min_stock) {
+									$message .= "<br><span style='color: #ff9800;'>⚠ Low stock: $new_available remaining</span>";
+								} else {
+									$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
+								}
+							} else {
+								throw new Exception("Failed to record transaction: " . $trans_stmt->error);
+							}
+							
+							$trans_stmt->close();
 						}
-						
-						$trans_stmt->close();
 					} else {
 						$conn->rollback();
 						$error = 'Sorry, this equipment is currently out of stock. All items are borrowed or unavailable.';
@@ -381,6 +391,19 @@ if ($db_connected) {
 					<div class="modal-equip-info-left">
 						<h3 id="modalEquipmentName"></h3>
 						<p class="modal-qty"><i class="fas fa-boxes"></i> <span id="modalEquipmentQty"></span> available</p>
+						<div class="quantity-control">
+							<label for="modalQuantityInput" class="quantity-label">Select Quantity</label>
+							<div class="quantity-spinner">
+								<button type="button" id="quantityMinusBtn" class="quantity-btn" aria-label="Decrease quantity">
+									<i class="fas fa-minus"></i>
+								</button>
+								<span id="quantityDisplay" class="quantity-number">1</span>
+								<button type="button" id="quantityPlusBtn" class="quantity-btn" aria-label="Increase quantity">
+									<i class="fas fa-plus"></i>
+								</button>
+							</div>
+							<small class="quantity-hint">Available: <span id="quantityMaxText">1</span></small>
+						</div>
 					</div>
 				</div>
 				
@@ -389,6 +412,7 @@ if ($db_connected) {
 					<form method="POST" id="borrowForm" class="borrow-form">
 						<input type="hidden" name="action" value="borrow">
 						<input type="hidden" name="equipment_id" id="modalEquipmentId">
+						<input type="hidden" name="quantity" id="modalQuantityInput" value="1">
 						
 						<div class="form-field">
 							<label><i class="fas fa-user"></i> Student ID</label>
@@ -426,10 +450,28 @@ if ($db_connected) {
 		window.location.href = 'borrow-return.php';
 	}
 
+	let currentMaxQuantity = 1;
+
+	function updateQuantityDisplay(value) {
+		const quantityDisplay = document.getElementById('quantityDisplay');
+		const hiddenInput = document.getElementById('modalQuantityInput');
+		const minusBtn = document.getElementById('quantityMinusBtn');
+		const plusBtn = document.getElementById('quantityPlusBtn');
+		const safeMax = Math.max(currentMaxQuantity, 1);
+		const newValue = Math.min(Math.max(value, 1), safeMax);
+		quantityDisplay.textContent = newValue;
+		hiddenInput.value = newValue;
+		minusBtn.disabled = newValue <= 1;
+		plusBtn.disabled = newValue >= safeMax;
+	}
+
 	function openBorrowModal(equipmentId, equipmentName, quantity, imagePath) {
 		document.getElementById('modalEquipmentId').value = equipmentId;
 		document.getElementById('modalEquipmentName').textContent = equipmentName;
 		document.getElementById('modalEquipmentQty').textContent = quantity;
+		document.getElementById('quantityMaxText').textContent = quantity;
+		currentMaxQuantity = Math.max(parseInt(quantity, 10) || 1, 1);
+		updateQuantityDisplay(1);
 		
 		const imageElement = document.getElementById('modalEquipmentImage');
 		const iconElement = document.getElementById('modalEquipmentIcon');
@@ -489,6 +531,16 @@ if ($db_connected) {
 		document.getElementById('borrowModal').dataset.intervalId = borrowTimeInterval;
 		document.getElementById('borrowModal').style.display = 'flex';
 	}
+
+	document.getElementById('quantityMinusBtn').addEventListener('click', function() {
+		const currentValue = parseInt(document.getElementById('modalQuantityInput').value, 10) || 1;
+		updateQuantityDisplay(currentValue - 1);
+	});
+
+	document.getElementById('quantityPlusBtn').addEventListener('click', function() {
+		const currentValue = parseInt(document.getElementById('modalQuantityInput').value, 10) || 1;
+		updateQuantityDisplay(currentValue + 1);
+	});
 
 	function closeBorrowModal() {
 		const modal = document.getElementById('borrowModal');

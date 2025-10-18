@@ -179,12 +179,13 @@ if ($db_connected) {
 	}
 
 	// Fetch borrowed items for the current user
-	$query = "SELECT t.*, e.name as equipment_name, e.image_path,
-					 c.name as category_name,
-					 TIMESTAMPDIFF(DAY, NOW(), t.expected_return_date) as days_remaining,
-					 CASE 
-						WHEN t.expected_return_date < NOW() THEN 'Overdue'	
-						WHEN DATE(t.expected_return_date) = CURDATE() THEN 'Due Today'
+	$query = "SELECT t.*, t.quantity AS borrowed_quantity,
+				 e.name as equipment_name, e.image_path,
+				 c.name as category_name,
+				 TIMESTAMPDIFF(DAY, NOW(), t.expected_return_date) as days_remaining,
+				 CASE 
+					WHEN t.expected_return_date < NOW() THEN 'Overdue'	
+					WHEN DATE(t.expected_return_date) = CURDATE() THEN 'Due Today'
 						ELSE 'On Time'
 					 END as status_text
 			  FROM transactions t
@@ -316,7 +317,7 @@ if ($db_connected) {
 							$image_src = '../uploads/' . basename($image_src);
 						}
 					?>
-					<div class="equip-card return-card" onclick="openReturnModal(<?= $item['id'] ?>, '<?= addslashes(htmlspecialchars($item['equipment_name'])) ?>', '<?= htmlspecialchars($item['status_text']) ?>', <?= abs($item['days_remaining']) ?>)">
+					<div class="equip-card return-card" onclick="openReturnModal(<?= $item['id'] ?>, '<?= addslashes(htmlspecialchars($item['equipment_name'])) ?>', '<?= htmlspecialchars($item['status_text']) ?>', <?= abs($item['days_remaining']) ?>, <?= (int)($item['borrowed_quantity'] ?? $item['quantity']) ?>)">
 						<div class="equip-image">
 							<?php if (!empty($image_src)): ?>
 								<img src="<?= htmlspecialchars($image_src) ?>" alt="<?= htmlspecialchars($item['equipment_name']) ?>" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -334,6 +335,9 @@ if ($db_connected) {
 							</p>
 							<p class="equip-due">
 								<i class="fas fa-calendar"></i> Due: <?= date('M j, Y g:i A', strtotime($item['expected_return_date'])) ?>
+							</p>
+							<p class="equip-qty">
+								<i class="fas fa-boxes"></i> Quantity: <?= (int)($item['borrowed_quantity'] ?? $item['quantity']) ?>
 							</p>
 							<span class="status-badge <?= $status_class ?>">
 								<?= $item['status_text'] ?>
@@ -361,13 +365,30 @@ if ($db_connected) {
 			</div>
 			
 			<div class="modal-body">
-				<form method="POST" id="returnForm">
-					<input type="hidden" name="action" value="return">
-					<input type="hidden" name="transaction_id" id="modalTransactionId">
-					
+			<form method="POST" id="returnForm" class="return-form">
+				<input type="hidden" name="action" value="return">
+				<input type="hidden" name="transaction_id" id="modalTransactionId">
+				<input type="hidden" name="return_photo" id="returnPhotoInput">
+				
+				<div class="return-modal-left">
+					<div class="capture-frame" id="captureFrame">
+						<video id="returnVideo" autoplay muted playsinline></video>
+						<canvas id="returnCanvas"></canvas>
+						<div class="capture-overlay">
+							<div class="capture-countdown" id="captureCountdown">5</div>
+						</div>
+					</div>
+					<div class="capture-status" id="captureStatus">Initializing camera…</div>
+					<button type="button" class="capture-retake" id="retakePhotoBtn" disabled>
+						<i class="fas fa-camera"></i> Retake Photo
+					</button>
+				</div>
+				
+				<div class="return-modal-right">
 					<div class="return-info">
 						<h3 id="modalEquipmentName"></h3>
 						<p id="modalStatusInfo"></p>
+						<p id="modalQuantityInfo" class="return-qty"></p>
 					</div>
 					
 					<div class="form-field">
@@ -388,8 +409,9 @@ if ($db_connected) {
 							<i class="fas fa-check"></i> Confirm Return
 						</button>
 					</div>
-				</form>
-			</div>
+				</div>
+			</form>
+		</div>
 		</div>
 	</div>
 
@@ -398,10 +420,134 @@ if ($db_connected) {
 		window.location.href = 'borrow-return.php';
 	}
 
-	function openReturnModal(transactionId, equipmentName, status, daysRemaining) {
+const returnForm = document.getElementById('returnForm');
+const videoEl = document.getElementById('returnVideo');
+const canvasEl = document.getElementById('returnCanvas');
+const countdownEl = document.getElementById('captureCountdown');
+const statusEl = document.getElementById('captureStatus');
+const retakeBtn = document.getElementById('retakePhotoBtn');
+const photoInput = document.getElementById('returnPhotoInput');
+const captureOverlay = document.querySelector('#captureFrame .capture-overlay');
+const confirmBtn = returnForm.querySelector('.btn-confirm');
+let mediaStream = null;
+let countdownTimer = null;
+let countdownSeconds = 5;
+
+function clearCountdown() {
+	if (countdownTimer) {
+		clearInterval(countdownTimer);
+		countdownTimer = null;
+	}
+}
+
+function stopCamera() {
+	if (mediaStream) {
+		mediaStream.getTracks().forEach(track => track.stop());
+		mediaStream = null;
+	}
+	if (videoEl) {
+		videoEl.srcObject = null;
+	}
+}
+
+function resetCaptureUI() {
+	clearCountdown();
+	photoInput.value = '';
+	countdownSeconds = 5;
+	countdownEl.textContent = countdownSeconds;
+	captureOverlay.style.display = 'flex';
+	videoEl.style.display = 'block';
+	canvasEl.style.display = 'none';
+	statusEl.textContent = 'Initializing camera…';
+	retakeBtn.disabled = true;
+	confirmBtn.disabled = true;
+}
+
+function startCountdown() {
+	clearCountdown();
+	countdownSeconds = 5;
+	countdownEl.textContent = countdownSeconds;
+	captureOverlay.style.display = 'flex';
+	retakeBtn.disabled = true;
+	confirmBtn.disabled = true;
+	countdownTimer = setInterval(() => {
+		countdownSeconds -= 1;
+		if (countdownSeconds <= 0) {
+			clearCountdown();
+			capturePhoto();
+		} else {
+			countdownEl.textContent = countdownSeconds;
+		}
+	}, 1000);
+}
+
+async function startCamera() {
+	try {
+		if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+			statusEl.textContent = 'Camera not supported on this device.';
+			confirmBtn.disabled = true;
+			retakeBtn.disabled = true;
+			captureOverlay.style.display = 'none';
+			return;
+		}
+		mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+		videoEl.srcObject = mediaStream;
+		await videoEl.play().catch(() => {});
+		statusEl.textContent = 'Camera ready. Taking photo in 5 seconds…';
+		startCountdown();
+	} catch (error) {
+		console.error('Camera error:', error);
+		statusEl.textContent = 'Unable to access camera. Please allow camera permissions.';
+		confirmBtn.disabled = true;
+		retakeBtn.disabled = true;
+		captureOverlay.style.display = 'none';
+	}
+}
+
+function capturePhoto() {
+	if (!videoEl.videoWidth || !videoEl.videoHeight) {
+		statusEl.textContent = 'Camera not ready yet. Retrying…';
+		startCountdown();
+		return;
+	}
+	canvasEl.width = videoEl.videoWidth;
+	canvasEl.height = videoEl.videoHeight;
+	const context = canvasEl.getContext('2d');
+	context.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+	const dataUrl = canvasEl.toDataURL('image/jpeg', 0.9);
+	photoInput.value = dataUrl;
+	canvasEl.style.display = 'block';
+	videoEl.style.display = 'none';
+	captureOverlay.style.display = 'none';
+	statusEl.textContent = 'Photo captured. You may retake or confirm the return.';
+	retakeBtn.disabled = false;
+	confirmBtn.disabled = false;
+}
+
+retakeBtn.addEventListener('click', () => {
+	if (retakeBtn.disabled) return;
+	photoInput.value = '';
+	canvasEl.style.display = 'none';
+	videoEl.style.display = 'block';
+	statusEl.textContent = 'Retaking photo…';
+	startCountdown();
+});
+
+returnForm.addEventListener('submit', (event) => {
+	if (!photoInput.value) {
+		event.preventDefault();
+		statusEl.textContent = 'Please wait for the photo to be captured before submitting.';
+		return;
+	}
+});
+
+	function openReturnModal(transactionId, equipmentName, status, daysRemaining, quantity) {
 		document.getElementById('modalTransactionId').value = transactionId;
 		document.getElementById('modalEquipmentName').textContent = equipmentName;
 		
+	resetCaptureUI();
+	startCamera();
+
 		let statusInfo = '';
 		if (status === 'Overdue') {
 			const penalty = daysRemaining * 10;
@@ -413,10 +559,13 @@ if ($db_connected) {
 		}
 		
 		document.getElementById('modalStatusInfo').innerHTML = statusInfo;
+		document.getElementById('modalQuantityInfo').innerHTML = `<i class="fas fa-boxes"></i> Borrowed quantity: <strong>${quantity}</strong>`;
 		document.getElementById('returnModal').style.display = 'flex';
 	}
 
 	function closeReturnModal() {
+		stopCamera();
+		resetCaptureUI();
 		document.getElementById('returnModal').style.display = 'none';
 	}
 
