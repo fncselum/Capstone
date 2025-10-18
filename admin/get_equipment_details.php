@@ -28,7 +28,7 @@ try {
     }
     
     // Fetch equipment details with category and inventory info
-    $sql = "SELECT e.id, e.name, e.rfid_tag, e.category_id, e.quantity, e.description, e.image_path,
+    $sql = "SELECT e.id, e.name, e.rfid_tag, e.category_id, e.quantity, e.size_category, e.description, e.image_path,
             c.name as category_name,
             i.borrowed_quantity,
             GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available,

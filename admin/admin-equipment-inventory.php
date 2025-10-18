@@ -102,7 +102,7 @@ if (!in_array($stock_filter, $allowed_filters)) {
 }
 
 // Build SQL query with stock filter
-$sql = "SELECT e.*, c.name as category_name, 
+$sql = "SELECT e.*, e.size_category, c.name as category_name, 
         e.quantity as quantity,
         i.borrowed_quantity, i.item_condition, i.availability_status, i.minimum_stock_level,
         GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available
@@ -130,6 +130,7 @@ if ($equipment_list) {
 }
 
 $condition_options = ['Excellent', 'Good', 'Fair', 'Poor', 'Out of Service'];
+$size_options = ['Small', 'Medium', 'Large'];
 $hasEquipment = !empty($equipment_items);
 ?>
 <!DOCTYPE html>
@@ -243,7 +244,8 @@ $hasEquipment = !empty($equipment_items);
                                 <div class="equipment-card"
                                      data-name="<?= htmlspecialchars(strtolower($row['name'] ?? '')) ?>"
                                      data-category="<?= htmlspecialchars(strtolower($row['category_name'] ?? '')) ?>"
-                                     data-condition="<?= htmlspecialchars(strtolower($row['item_condition'] ?? '')) ?>">
+                                     data-condition="<?= htmlspecialchars(strtolower($row['item_condition'] ?? '')) ?>"
+                                     data-size="<?= htmlspecialchars(strtolower($row['size_category'] ?? '')) ?>">
                                     <?php if (!empty($row['image_path'])): ?>
                                         <?php
                                             $image_src = $row['image_path'];
@@ -260,6 +262,11 @@ $hasEquipment = !empty($equipment_items);
                                     <div class="equipment-info">
                                         <div class="equipment-id">#<?= htmlspecialchars($row['id']) ?></div>
                                         <h3 class="equipment-name"> <?= htmlspecialchars($row['name']) ?></h3>
+                                        <?php if (!empty($row['size_category'])): ?>
+                                            <div class="equipment-size">
+                                                <i class="fas fa-ruler-combined"></i> <?= htmlspecialchars($row['size_category']) ?> Item
+                                            </div>
+                                        <?php endif; ?>
                                         <?php 
                                             // Always display quantity from equipment table
                                             $equipment_qty = $row['quantity'] ?? 0;
@@ -380,6 +387,17 @@ $hasEquipment = !empty($equipment_items);
                         <input type="number" id="quantity" name="quantity" min="0" required>
                     </div>
                 </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="size_category">Item Size *</label>
+                        <select id="size_category" name="size_category" required>
+                            <?php foreach($size_options as $size): ?>
+                                <option value="<?= $size ?>" <?= $size === 'Medium' ? 'selected' : '' ?>><?= $size ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
                 
                 <div class="form-group">
                     <label for="image_path">Image URL (optional)</label>
@@ -496,6 +514,10 @@ $hasEquipment = !empty($equipment_items);
             document.getElementById('equipmentForm').reset();
             document.getElementById('equipmentId').value = '';
             document.getElementById('rfid_tag').value = '';
+            const sizeSelect = document.getElementById('size_category');
+            if (sizeSelect) {
+                sizeSelect.value = 'Medium';
+            }
             document.getElementById('equipmentModal').style.display = 'block';
         }
 
@@ -654,9 +676,7 @@ $hasEquipment = !empty($equipment_items);
                                         <select id="manage_category" name="category_id">
                                             <option value="">Select Category</option>
                                             <?php foreach($categories as $category): ?>
-                                                <option value="<?= $category['id'] ?>">${equipment.category_id == <?= $category['id'] ?> ? 'selected' : ''}>
-                                                    <?= htmlspecialchars($category['name']) ?>
-                                                </option>
+                                                <option value="<?= $category['id'] ?>"><?= htmlspecialchars($category['name']) ?></option>
                                             <?php endforeach; ?>
                                         </select>
                                     </div>
@@ -664,6 +684,17 @@ $hasEquipment = !empty($equipment_items);
                                     <div class="form-group">
                                         <label for="manage_quantity">Quantity *</label>
                                         <input type="number" id="manage_quantity" name="quantity" value="${equipment.quantity || 0}" min="0" required>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="manage_size_category">Item Size *</label>
+                                        <select id="manage_size_category" name="size_category" required>
+                                            <?php foreach($size_options as $size): ?>
+                                                <option value="<?= $size ?>"><?= $size ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
                                     </div>
                                 </div>
                                 
@@ -693,10 +724,15 @@ $hasEquipment = !empty($equipment_items);
                                 </div>
                             </form>
                         `;
-                        
-                        // Set the selected category
-                        if (equipment.category_id) {
-                            document.getElementById('manage_category').value = equipment.category_id;
+
+                        // Set the selected category and size
+                        const manageCategorySelect = document.getElementById('manage_category');
+                        if (manageCategorySelect && equipment.category_id) {
+                            manageCategorySelect.value = equipment.category_id;
+                        }
+                        const manageSizeSelect = document.getElementById('manage_size_category');
+                        if (manageSizeSelect) {
+                            manageSizeSelect.value = equipment.size_category || 'Medium';
                         }
                     } else {
                         content.innerHTML = `<div class="error-message">${data.message || 'Failed to load equipment details.'}</div>`;

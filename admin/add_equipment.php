@@ -34,6 +34,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $quantity = trim($_POST['quantity'] ?? '');
         $description = trim($_POST['description'] ?? '');
         $image_url = trim($_POST['image_path'] ?? ''); // From form field "image_path" for URL
+        $size_category = trim($_POST['size_category'] ?? '');
+        $allowed_sizes = ['Small', 'Medium', 'Large'];
         
         // Validation
         if (empty($name)) {
@@ -50,6 +52,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if (empty($quantity) || !is_numeric($quantity) || $quantity < 0) {
             throw new Exception("Please enter a valid Quantity (must be 0 or greater).");
+        }
+
+        if (empty($size_category) || !in_array($size_category, $allowed_sizes, true)) {
+            throw new Exception("Please select a valid item size.");
         }
         
         // Check if RFID tag already exists
@@ -115,9 +121,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Prepare SQL statement with prepared statements for security
         $sql = "INSERT INTO equipment 
-                (name, rfid_tag, category_id, quantity, description, image_path, created_at, updated_at) 
+                (name, rfid_tag, category_id, quantity, size_category, description, image_path, created_at, updated_at) 
                 VALUES 
-                (:name, :rfid_tag, :category_id, :quantity, :description, :image_path, NOW(), NOW())";
+                (:name, :rfid_tag, :category_id, :quantity, :size_category, :description, :image_path, NOW(), NOW())";
         
         $stmt = $pdo->prepare($sql);
         
@@ -127,6 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':rfid_tag' => $rfid_tag,
             ':category_id' => (int)$category_id,
             ':quantity' => (int)$quantity,
+            ':size_category' => $size_category,
             ':description' => $description,
             ':image_path' => $image_path
         ]);
@@ -137,10 +144,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Automatically insert into inventory table
             try {
                 // Check if inventory record already exists (shouldn't happen, but just in case)
-                $check_inventory = $pdo->prepare("SELECT id FROM inventory WHERE equipment_id = :equipment_id LIMIT 1");
-                $check_inventory->execute([':equipment_id' => $new_equipment_id]);
+                $stmt = $pdo->prepare("SELECT id FROM inventory WHERE equipment_id = :equipment_id LIMIT 1");
+                $stmt->execute([':equipment_id' => $rfid_tag]);
                 
-                if ($check_inventory->rowCount() === 0) {
+                if ($stmt->rowCount() === 0) {
                     // Determine availability status based on quantity
                     $availability_status = ((int)$quantity > 0) ? 'Available' : 'Out of Stock';
                     
@@ -152,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fields = ['equipment_id', 'quantity', 'available_quantity'];
                     $values = [':equipment_id', ':quantity', ':available_quantity'];
                     $params = [
-                        ':equipment_id' => $new_equipment_id,
+                        ':equipment_id' => $rfid_tag,
                         ':quantity' => (int)$quantity,
                         ':available_quantity' => (int)$quantity
                     ];
@@ -174,6 +181,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $fields[] = 'item_condition';
                         $values[] = ':item_condition';
                         $params[':item_condition'] = 'Good';
+                    }
+
+                    if (in_array('item_size', $existing_columns)) {
+                        $fields[] = 'item_size';
+                        $values[] = ':item_size';
+                        $params[':item_size'] = $size_category;
                     }
                     
                     if (in_array('availability_status', $existing_columns)) {
@@ -218,11 +231,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $inventory_stmt->execute($params);
                     
                     // Automatically update availability_status
-                    updateAvailabilityStatus($pdo, $new_equipment_id);
+                    updateAvailabilityStatus($pdo, $rfid_tag);
                     
-                    error_log("Inventory record created successfully for equipment ID: $new_equipment_id");
+                    error_log("Inventory record created successfully for equipment RFID: $rfid_tag");
                 } else {
-                    error_log("Inventory record already exists for equipment ID: $new_equipment_id");
+                    error_log("Inventory record already exists for equipment RFID: $rfid_tag");
                 }
             } catch (PDOException $e) {
                 // Log error but don't fail the entire operation

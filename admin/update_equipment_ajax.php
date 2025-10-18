@@ -32,6 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $quantity = trim($_POST['quantity'] ?? '');
         $description = trim($_POST['description'] ?? '');
         $image_url = trim($_POST['image_path'] ?? '');
+        $size_category = trim($_POST['size_category'] ?? '');
+        $allowed_sizes = ['Small', 'Medium', 'Large'];
         
         // Validation
         if ($id <= 0) {
@@ -48,6 +50,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if (!is_numeric($quantity) || $quantity < 0) {
             throw new Exception("Please enter a valid Quantity (must be 0 or greater).");
+        }
+
+        if (empty($size_category) || !in_array($size_category, $allowed_sizes, true)) {
+            throw new Exception("Please select a valid item size.");
         }
         
         // Get current image path
@@ -120,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rfid_tag = :rfid_tag, 
                     category_id = :category_id, 
                     quantity = :quantity, 
+                    size_category = :size_category,
                     description = :description, 
                     image_path = :image_path, 
                     updated_at = NOW() 
@@ -134,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':rfid_tag' => $rfid_tag,
             ':category_id' => !empty($category_id) ? (int)$category_id : null,
             ':quantity' => (int)$quantity,
+            ':size_category' => $size_category,
             ':description' => $description,
             ':image_path' => $image_path
         ]);
@@ -141,9 +149,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($result) {
             // Automatically sync with inventory table
             try {
+                $inventory_key = $rfid_tag;
                 // Check if inventory record exists
                 $check_stmt = $pdo->prepare("SELECT id, borrowed_quantity, damaged_quantity FROM inventory WHERE equipment_id = :equipment_id LIMIT 1");
-                $check_stmt->execute([':equipment_id' => $id]);
+                $check_stmt->execute([':equipment_id' => $inventory_key]);
                 $inventory = $check_stmt->fetch(PDO::FETCH_ASSOC);
                 
                 if ($inventory) {
@@ -163,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ];
                     
                     $params = [
-                        ':equipment_id' => $id,
+                        ':equipment_id' => $inventory_key,
                         ':quantity' => (int)$quantity,
                         ':available_quantity' => $available
                     ];
@@ -184,9 +193,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $inventory_stmt->execute($params);
                     
                     // Automatically update availability_status based on available_quantity
-                    updateAvailabilityStatus($pdo, $id);
+                    updateAvailabilityStatus($pdo, $inventory_key);
                     
-                    error_log("Inventory synced successfully for equipment ID: $id (quantity: $quantity, available: $available)");
+                    error_log("Inventory synced successfully for equipment key: $inventory_key (quantity: $quantity, available: $available)");
                 } else {
                     // Create inventory record if it doesn't exist
                     $create_inventory = "INSERT INTO inventory (equipment_id, quantity, available_quantity, borrowed_quantity, damaged_quantity, availability_status, last_updated, created_at) 
@@ -195,13 +204,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     $create_stmt = $pdo->prepare($create_inventory);
                     $create_stmt->execute([
-                        ':equipment_id' => $id,
+                        ':equipment_id' => $inventory_key,
                         ':quantity' => (int)$quantity,
                         ':available_quantity' => (int)$quantity,
                         ':status' => $status
                     ]);
                     
-                    error_log("Inventory record created for equipment ID: $id");
+                    updateAvailabilityStatus($pdo, $inventory_key);
+                    
+                    error_log("Inventory record created for equipment key: $inventory_key");
                 }
             } catch (PDOException $e) {
                 error_log("Inventory sync failed: " . $e->getMessage());
