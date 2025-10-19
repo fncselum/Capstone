@@ -52,7 +52,8 @@ if ($db_connected) {
 					i.damaged_quantity,
 					i.minimum_stock_level,
 					i.availability_status,
-					i.equipment_id AS inventory_equipment_id
+					i.equipment_id AS inventory_equipment_id,
+					i.item_size AS inventory_item_size
 				FROM equipment e 
 				LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id 
 				WHERE e.id = ? FOR UPDATE");
@@ -73,6 +74,7 @@ if ($db_connected) {
 					$min_stock = (int)($equip_data['minimum_stock_level'] ?? 1);
 					$rfid_code = $equip_data['rfid_tag'] ?? '';
 					$inventory_equipment_id = $equip_data['inventory_equipment_id'] ?? null;
+					$item_size = $equip_data['size_category'] ?? $equip_data['inventory_item_size'] ?? 'Medium';
 					
 					// Ensure inventory record exists and item is available
 					if (empty($rfid_code) || empty($inventory_equipment_id)) {
@@ -83,35 +85,53 @@ if ($db_connected) {
 							$conn->rollback();
 							$error = 'Unable to borrow that many items. Only ' . $available_qty . ' available at the moment.';
 						} else {
-							// Insert transaction record with all required fields
+							// Determine flow based on size
 							$transaction_type = 'Borrow';
 							$quantity = $requested_qty;
 							$expected_return_date = date('Y-m-d H:i:s', strtotime($due_date));
-							$status = 'Active';
-							$penalty_applied = 0;
 							$notes = "Borrowed via kiosk by student ID: " . $student_id;
+							$penalty_applied = 0;
+							$status = 'Active';
+							$requiresApproval = (strtolower($item_size) === 'large');
+							$borrow_status = $requiresApproval ? 'Pending Approval' : 'Active';
+							$approval_status = $requiresApproval ? 'Pending' : 'Approved';
+							$approved_by = null;
+							$approved_at = $requiresApproval ? null : date('Y-m-d H:i:s');
+							$rejection_reason = null;
+							$return_review_status = 'Pending';
 							
 							$trans_stmt = $conn->prepare("INSERT INTO transactions 
 								(user_id, equipment_id, transaction_type, quantity, transaction_date, 
-								expected_return_date, condition_before, status, penalty_applied, notes, created_at, updated_at) 
-								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, NOW(), NOW())");
+								expected_return_date, condition_before, status, penalty_applied, notes, item_size, approval_status, approved_by, approved_at, rejection_reason, return_review_status, created_at, updated_at) 
+								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
 							
-							$trans_stmt->bind_param("iisisssis", 
+							$trans_stmt->bind_param("iisisssisssisss", 
 								$user_id, 
 								$equipment_id, 
 								$transaction_type, 
 								$quantity,
 								$expected_return_date, 
 								$condition_before,
-								$status,
+								$borrow_status,
 								$penalty_applied,
-								$notes
+								$notes,
+								$item_size,
+								$approval_status,
+								$approved_by,
+								$approved_at,
+								$rejection_reason,
+								$return_review_status
 							);
 							
 							if ($trans_stmt->execute()) {
 								$transaction_id = $conn->insert_id;
-
-								$inv_update = $conn->prepare("UPDATE inventory 
+								
+								if ($requiresApproval) {
+									$conn->commit();
+									$message = "Borrow request submitted for <strong>$equipment_name</strong>.<br>Status: <strong>Pending Admin Approval</strong><br>Transaction ID: #$transaction_id";
+									$message .= "<br><span style='color:#ff9800;'>⚠ Inventory will update once the admin approves your request.</span>";
+								} else {
+									$inv_update = $conn->prepare("UPDATE inventory 
 									SET available_quantity = available_quantity - ?,
 										borrowed_quantity = borrowed_quantity + ?,
 										availability_status = CASE
@@ -121,42 +141,44 @@ if ($db_connected) {
 										END,
 										last_updated = NOW()
 									WHERE equipment_id = ? AND available_quantity >= ?");
-								$inv_update->bind_param("iiiisi", $quantity, $quantity, $quantity, $quantity, $rfid_code, $quantity);
+									$inv_update->bind_param("iiiisi", $quantity, $quantity, $quantity, $quantity, $rfid_code, $quantity);
 									
-								if (!$inv_update->execute() || $inv_update->affected_rows !== 1) {
-									throw new Exception('Failed to update inventory. Item may be out of stock.');
-								}
-								$inv_update->close();
+									if (!$inv_update->execute() || $inv_update->affected_rows !== 1) {
+										throw new Exception('Failed to update inventory. Item may be out of stock.');
+									}
+									$inv_update->close();
 
-								// Fetch updated inventory status for message display
-								$inv_stmt = $conn->prepare("SELECT available_quantity, borrowed_quantity, availability_status FROM inventory WHERE equipment_id = ? LIMIT 1");
-								$inv_stmt->bind_param("s", $rfid_code);
-								$inv_stmt->execute();
-								$inv_result = $inv_stmt->get_result();
-								$inv_data = $inv_result ? $inv_result->fetch_assoc() : null;
-								$inv_stmt->close();
-								
-								if (!$inv_data) {
-									throw new Exception('Inventory record missing after update.');
-								}
+									// Fetch updated inventory status for message display
+									$inv_stmt = $conn->prepare("SELECT available_quantity, borrowed_quantity, availability_status FROM inventory WHERE equipment_id = ? LIMIT 1");
+									$inv_stmt->bind_param("s", $rfid_code);
+									$inv_stmt->execute();
+									$inv_result = $inv_stmt->get_result();
+									$inv_data = $inv_result ? $inv_result->fetch_assoc() : null;
+									$inv_stmt->close();
+									
+									if (!$inv_data) {
+										throw new Exception('Inventory record missing after update.');
+									}
 
-								$new_available = (int)$inv_data['available_quantity'];
-								$new_status = $inv_data['availability_status'];
+									$new_available = (int)$inv_data['available_quantity'];
+									$new_status = $inv_data['availability_status'];
 
-								$conn->commit();
-								
-								$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
-								$quantity_phrase = $quantity . ' ' . ($quantity === 1 ? 'item' : 'items');
-								$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Borrowed: $quantity_phrase<br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
-								
-								if ($new_available <= 0) {
-									$message .= "<br><span style='color: #ff9800;'>⚠ This was the last available item</span>";
-								} elseif ($new_available <= $min_stock) {
-									$message .= "<br><span style='color: #ff9800;'>⚠ Low stock: $new_available remaining</span>";
-								} else {
-									$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
+									$conn->commit();
+									
+									$return_date_formatted = date('M j, Y g:i A', strtotime($expected_return_date));
+									$quantity_phrase = $quantity . ' ' . ($quantity === 1 ? 'item' : 'items');
+									$message = "Equipment borrowed successfully!<br><strong>$equipment_name</strong><br>Borrowed: $quantity_phrase<br>Please return by: $return_date_formatted<br>Transaction ID: #$transaction_id";
+									
+									if ($new_available <= 0) {
+										$message .= "<br><span style='color: #ff9800;'>⚠ This was the last available item</span>";
+									} elseif ($new_available <= $min_stock) {
+										$message .= "<br><span style='color: #ff9800;'>⚠ Low stock: $new_available remaining</span>";
+									} else {
+										$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
+									}
 								}
-							} else {
+							}
+							else {
 								throw new Exception("Failed to record transaction: " . $trans_stmt->error);
 							}
 							
@@ -194,6 +216,7 @@ if ($db_connected) {
 	          i.borrowed_quantity,
 	          i.damaged_quantity,
 	          i.availability_status,
+	          i.item_size,
 	          COALESCE(i.available_quantity,
 	              GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0)
 	          ) AS computed_available
@@ -327,10 +350,13 @@ if ($db_connected) {
 								$condition = strtolower(str_replace(' ', '-', $item['item_condition'] ?? ''));
 								$categoryKey = strtolower($item['category_name'] ?? '');
 								$availableQty = (int)($item['computed_available'] ?? $item['available_quantity'] ?? 0);
+								$itemSize = $item['size_category'] ?? $item['item_size'] ?? 'Medium';
+								$isLarge = strtolower($itemSize) === 'large';
 							?>
 					<div class="equip-card" 
 						data-name="<?= htmlspecialchars(strtolower($item['name'])) ?>" 
-						data-category="<?= htmlspecialchars($categoryKey) ?>">
+						data-category="<?= htmlspecialchars($categoryKey) ?>"
+						data-size="<?= htmlspecialchars(strtolower($itemSize)) ?>">
 						
 						<div class="equip-image">
 							<?php if(!empty($item['image_path'])): 
@@ -352,6 +378,7 @@ if ($db_connected) {
 						<div class="equip-details">
 							<span class="equip-id">#<?= $item['id'] ?></span>
 							<h3 class="equip-name"><?= htmlspecialchars($item['name']) ?></h3>
+							<span class="size-badge size-<?= htmlspecialchars(strtolower($itemSize)) ?>"><?= htmlspecialchars($itemSize) ?> Item</span>
 							<p class="equip-category">
 								<i class="fas fa-tag"></i> <?= htmlspecialchars($item['category_name'] ?? 'Uncategorized') ?>
 							</p>
@@ -359,9 +386,12 @@ if ($db_connected) {
 								<i class="fas fa-boxes"></i> 
 								<span><?= $availableQty ?> available</span>
 							</div>
+							<?php if ($isLarge): ?>
+							<div class="large-item-banner">⚠ Requires admin approval</div>
+							<?php endif; ?>
 						</div>
 						
-						<button class="borrow-btn" onclick="openBorrowModal(<?= (int)$item['id'] ?>, '<?= addslashes(htmlspecialchars($item['name'])) ?>', <?= $availableQty ?>, '<?= addslashes(htmlspecialchars($item['image_path'] ?? '')) ?>')">
+						<button class="borrow-btn" onclick='openBorrowModal(<?= (int)$item['id'] ?>, <?= json_encode($item['name'] ?? '') ?>, <?= $availableQty ?>, <?= json_encode($item['image_path'] ?? '') ?>, <?= json_encode($itemSize) ?>)'>
 							<i class="fas fa-hand-holding"></i> Borrow
 						</button>
 					</div>
@@ -391,6 +421,8 @@ if ($db_connected) {
 					<div class="modal-equip-info-left">
 						<h3 id="modalEquipmentName"></h3>
 						<p class="modal-qty"><i class="fas fa-boxes"></i> <span id="modalEquipmentQty"></span> available</p>
+						<div class="modal-size-tag" id="modalSizeTag"></div>
+						<div class="large-item-banner" id="modalSizeBanner" style="display:none;">⚠ This item is large and requires admin approval before borrowing.</div>
 						<div class="quantity-control">
 							<label for="modalQuantityInput" class="quantity-label">Select Quantity</label>
 							<div class="quantity-spinner">
@@ -451,6 +483,7 @@ if ($db_connected) {
 	}
 
 	let currentMaxQuantity = 1;
+	let currentItemSize = 'Medium';
 
 	function updateQuantityDisplay(value) {
 		const quantityDisplay = document.getElementById('quantityDisplay');
@@ -465,13 +498,30 @@ if ($db_connected) {
 		plusBtn.disabled = newValue >= safeMax;
 	}
 
-	function openBorrowModal(equipmentId, equipmentName, quantity, imagePath) {
+	function applySizeUI(sizeCategory) {
+		const sizeTag = document.getElementById('modalSizeTag');
+		const banner = document.getElementById('modalSizeBanner');
+		const confirmBtn = document.querySelector('#borrowForm .btn-confirm');
+		sizeTag.textContent = `${sizeCategory} Item`;
+		sizeTag.className = `modal-size-tag size-${sizeCategory.toLowerCase()}`;
+		if (sizeCategory.toLowerCase() === 'large') {
+			banner.style.display = 'block';
+			confirmBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit for Approval';
+		} else {
+			banner.style.display = 'none';
+			confirmBtn.innerHTML = '<i class="fas fa-check"></i> Confirm Borrow';
+		}
+	}
+
+	function openBorrowModal(equipmentId, equipmentName, quantity, imagePath, sizeCategory = 'Medium') {
 		document.getElementById('modalEquipmentId').value = equipmentId;
 		document.getElementById('modalEquipmentName').textContent = equipmentName;
 		document.getElementById('modalEquipmentQty').textContent = quantity;
 		document.getElementById('quantityMaxText').textContent = quantity;
 		currentMaxQuantity = Math.max(parseInt(quantity, 10) || 1, 1);
 		updateQuantityDisplay(1);
+		currentItemSize = sizeCategory || 'Medium';
+		applySizeUI(currentItemSize);
 		
 		const imageElement = document.getElementById('modalEquipmentImage');
 		const iconElement = document.getElementById('modalEquipmentIcon');
@@ -612,6 +662,8 @@ if ($db_connected) {
 		equipmentList.forEach(item => {
 			const categoryKey = (item.category_name || '').toLowerCase();
 			const availableQty = parseInt(item.computed_available ?? item.available_quantity ?? 0) || 0;
+			const sizeCategory = item.size_category || item.item_size || 'Medium';
+			const isLarge = String(sizeCategory).toLowerCase() === 'large';
 			if (availableQty <= 0) {
 				return;
 			}
@@ -629,7 +681,8 @@ if ($db_connected) {
 			html += `
 				<div class="equip-card" 
 					data-name="${(item.name || '').toLowerCase()}" 
-					data-category="${categoryKey}">
+					data-category="${categoryKey}"
+					data-size="${sizeCategory.toLowerCase()}">
 					
 					<div class="equip-image">
 						${imageSrc ? `
@@ -643,6 +696,7 @@ if ($db_connected) {
 					<div class="equip-details">
 						<span class="equip-id">#${item.id}</span>
 						<h3 class="equip-name">${item.name}</h3>
+						<span class="size-badge size-${sizeCategory.toLowerCase()}">${sizeCategory} Item</span>
 						<p class="equip-category">
 							<i class="fas fa-tag"></i> ${item.category_name || 'Uncategorized'}
 						</p>
@@ -650,9 +704,10 @@ if ($db_connected) {
 							<i class="fas fa-boxes"></i> 
 							<span>${availableQty} available</span>
 						</div>
+						${isLarge ? '<div class="large-item-banner">⚠ Requires admin approval</div>' : ''}
 					</div>
 					
-					<button class="borrow-btn" onclick="openBorrowModal(${item.id}, '${item.name.replace(/'/g, "\\'")}', ${availableQty}, '${(imageSrc || '').replace(/'/g, "\\'")}')">
+					<button class="borrow-btn" onclick='openBorrowModal(${item.id}, ${JSON.stringify(item.name || '')}, ${availableQty}, ${JSON.stringify(item.image_path || '')}, ${JSON.stringify(sizeCategory)})'>
 						<i class="fas fa-hand-holding"></i> Borrow
 					</button>
 				</div>

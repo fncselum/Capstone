@@ -180,9 +180,9 @@ if ($db_connected) {
 
 	// Fetch borrowed items for the current user
 	$query = "SELECT t.*, t.quantity AS borrowed_quantity,
-				 e.name as equipment_name, e.image_path,
-				 c.name as category_name,
-				 TIMESTAMPDIFF(DAY, NOW(), t.expected_return_date) as days_remaining,
+			 e.name as equipment_name, e.image_path, e.rfid_tag AS equipment_rfid,
+			 c.name as category_name,
+			 TIMESTAMPDIFF(DAY, NOW(), t.expected_return_date) as days_remaining,
 				 CASE 
 					WHEN t.expected_return_date < NOW() THEN 'Overdue'	
 					WHEN DATE(t.expected_return_date) = CURDATE() THEN 'Due Today'
@@ -229,19 +229,30 @@ if ($db_connected) {
 		</div>
 
 		<div class="return-page-content">
-			<!-- Header -->
-			<div class="return-header">
-				<div class="header-left">
-					<img src="../uploads/De lasalle ASMC.png" alt="Logo" class="header-logo-small">
-					<div>
-						<h1 class="page-title">Return Equipment</h1>
-						<p class="page-subtitle">Student ID: <?= htmlspecialchars($student_id) ?></p>
-					</div>
+		<!-- Header -->
+		<div class="return-header">
+			<div class="header-left">
+				<img src="../uploads/De lasalle ASMC.png" alt="Logo" class="header-logo-small">
+				<div>
+					<h1 class="page-title">Return Equipment</h1>
+					<p class="page-subtitle">Student ID: <?= htmlspecialchars($student_id) ?></p>
 				</div>
+			</div>
+			<div class="header-actions">
+				<form id="returnScanForm" class="rfid-listener" autocomplete="off" aria-hidden="true">
+					<input type="text" id="returnScanInput" name="return_rfid" inputmode="numeric" autocomplete="off" autofocus>
+					<button type="submit" tabindex="-1">Scan</button>
+				</form>
 				<button class="back-btn" onclick="goBack()">
 					<i class="fas fa-arrow-left"></i> Back
 				</button>
 			</div>
+		</div>
+
+		<div class="return-instructions">
+			<p><strong>Scan the equipment RFID</strong> to open the return form automatically. You can also click <strong>“Return”</strong> below an item for manual processing.</p>
+			<div id="scanStatusMessage" class="scan-status" role="status" aria-live="polite"></div>
+		</div>
 
 			<?php if ($message): ?>
 			<!-- Success Modal -->
@@ -317,7 +328,7 @@ if ($db_connected) {
 							$image_src = '../uploads/' . basename($image_src);
 						}
 					?>
-					<div class="equip-card return-card" onclick="openReturnModal(<?= $item['id'] ?>, '<?= addslashes(htmlspecialchars($item['equipment_name'])) ?>', '<?= htmlspecialchars($item['status_text']) ?>', <?= abs($item['days_remaining']) ?>, <?= (int)($item['borrowed_quantity'] ?? $item['quantity']) ?>)">
+					<div class="equip-card return-card" data-transaction-id="<?= $item['id'] ?>" data-equipment-name="<?= htmlspecialchars($item['equipment_name']) ?>" data-equipment-rfid="<?= htmlspecialchars($item['equipment_rfid'] ?? '') ?>" onclick="openReturnModal(<?= $item['id'] ?>, '<?= addslashes(htmlspecialchars($item['equipment_name'])) ?>', '<?= htmlspecialchars($item['status_text']) ?>', <?= abs($item['days_remaining']) ?>, <?= (int)($item['borrowed_quantity'] ?? $item['quantity']) ?>)">
 						<div class="equip-image">
 							<?php if (!empty($image_src)): ?>
 								<img src="<?= htmlspecialchars($image_src) ?>" alt="<?= htmlspecialchars($item['equipment_name']) ?>" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -432,6 +443,91 @@ const confirmBtn = returnForm.querySelector('.btn-confirm');
 let mediaStream = null;
 let countdownTimer = null;
 let countdownSeconds = 5;
+const scanForm = document.getElementById('returnScanForm');
+const scanInput = document.getElementById('returnScanInput');
+const scanStatus = document.getElementById('scanStatusMessage');
+
+function setScanStatus(message, type = 'info') {
+	if (!scanStatus) return;
+	scanStatus.textContent = message;
+	scanStatus.dataset.state = type;
+	if (type !== 'scanning') {
+		setTimeout(() => {
+			if (scanStatus.dataset.state === type) {
+				scanStatus.textContent = '';
+				scanStatus.dataset.state = '';
+			}
+		}, 4000);
+	}
+}
+
+async function fetchTransactionByRFID(rfidValue) {
+	const response = await fetch('fetch_return_item.php', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/x-www-form-urlencoded'
+		},
+		body: 'rfid=' + encodeURIComponent(rfidValue)
+	});
+	if (!response.ok) {
+		throw new Error('Network error');
+	}
+	const data = await response.json();
+	if (!data.success) {
+		throw new Error(data.message || 'Unable to find transaction');
+	}
+	return data;
+}
+
+function highlightCard(transactionId) {
+	const card = document.querySelector(`[data-transaction-id="${transactionId}"]`);
+	if (!card) return;
+	card.classList.add('highlight');
+	card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	setTimeout(() => card.classList.remove('highlight'), 2000);
+}
+
+function ensureScanFocus() {
+	if (scanInput && !document.getElementById('returnModal').classList.contains('active')) {
+		scanInput.focus();
+	}
+}
+
+if (scanForm && scanInput) {
+	window.addEventListener('load', () => setTimeout(ensureScanFocus, 200));
+
+	scanForm.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		const rfidValue = scanInput.value.trim();
+		if (!rfidValue) return;
+		setScanStatus('Scanning RFID...', 'scanning');
+		scanInput.value = '';
+		try {
+			const data = await fetchTransactionByRFID(rfidValue);
+			setScanStatus(`Found ${data.equipment_name}. Preparing return form…`, 'success');
+			highlightCard(data.transaction_id);
+			openReturnModal(
+				data.transaction_id,
+				data.equipment_name,
+				data.status_text,
+				Math.abs(data.days_overdue || 0),
+				data.quantity
+			);
+		} catch (err) {
+			setScanStatus(err.message || 'Scan failed. Please try again.', 'error');
+		} finally {
+			setTimeout(ensureScanFocus, 400);
+		}
+	});
+
+	document.addEventListener('click', (event) => {
+		const inModal = event.target.closest('.modal-box');
+		if (inModal) return;
+		if (scanInput && document.activeElement !== scanInput) {
+			scanInput.focus();
+		}
+	});
+}
 
 function clearCountdown() {
 	if (countdownTimer) {
@@ -560,13 +656,18 @@ returnForm.addEventListener('submit', (event) => {
 		
 		document.getElementById('modalStatusInfo').innerHTML = statusInfo;
 		document.getElementById('modalQuantityInfo').innerHTML = `<i class="fas fa-boxes"></i> Borrowed quantity: <strong>${quantity}</strong>`;
-		document.getElementById('returnModal').style.display = 'flex';
+		const modal = document.getElementById('returnModal');
+		modal.style.display = 'flex';
+		modal.classList.add('active');
 	}
 
 	function closeReturnModal() {
 		stopCamera();
 		resetCaptureUI();
-		document.getElementById('returnModal').style.display = 'none';
+		const modal = document.getElementById('returnModal');
+		modal.style.display = 'none';
+		modal.classList.remove('active');
+		setTimeout(ensureScanFocus, 200);
 	}
 
 	// Close modal when clicking outside

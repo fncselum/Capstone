@@ -21,6 +21,8 @@ if ($conn->connect_error) {
 
 $conn->select_db($dbname);
 
+$conn->query("UPDATE transactions SET approval_status = 'Approved' WHERE status <> 'Pending Approval' AND (approval_status = 'Pending' OR approval_status IS NULL)");
+
 // Check if users table exists
 $users_table_exists = false;
 $check_users = $conn->query("SHOW TABLES LIKE 'users'");
@@ -58,19 +60,29 @@ if ($users_table_exists) {
                 COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                 e.name as equipment_name,
                 $user_name_col
-                $student_id_col
+                $student_id_col,
+                t.approved_by,
+                inv.availability_status AS inventory_status,
+                inv.available_quantity AS inventory_available_qty,
+                inv.borrowed_quantity AS inventory_borrowed_qty
          FROM transactions t
          LEFT JOIN equipment e ON t.equipment_id = e.id
          LEFT JOIN users u ON t.user_id = u.id
+         LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
          ORDER BY t.transaction_date DESC";
 } else {
     // Fallback if users table doesn't exist - use rfid_id from transactions
     $query = "SELECT t.*, 
                 COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                 e.name as equipment_name,
-                t.rfid_id as student_id
+                t.rfid_id as student_id,
+                t.approved_by,
+                inv.availability_status AS inventory_status,
+                inv.available_quantity AS inventory_available_qty,
+                inv.borrowed_quantity AS inventory_borrowed_qty
          FROM transactions t
          LEFT JOIN equipment e ON t.equipment_id = e.id
+         LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
          ORDER BY t.transaction_date DESC";
 }
 
@@ -174,10 +186,188 @@ if (!$all_transactions) {
             background: #ffebee;
             color: #d32f2f;
         }
+        .badge.rejected {
+            background: #ffebee;
+            color: #c62828;
+        }
         .no-data {
             text-align: center;
             padding: 40px;
             color: #999;
+        }
+        .approval-feedback {
+            display: none;
+            margin-bottom: 15px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        .approval-feedback.show {
+            display: block;
+        }
+        .approval-feedback.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .approval-feedback.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .approval-meta {
+            margin-top: 6px;
+            font-size: 0.85em;
+            color: #555;
+        }
+        .approval-meta small {
+            color: inherit;
+        }
+        .approval-meta:empty {
+            display: none;
+        }
+        .approval-meta .danger-text {
+            color: #d32f2f;
+        }
+        .approval-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .approval-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: none;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            color: #fff;
+        }
+        .approve-btn {
+            background: #4caf50;
+        }
+        .approve-btn:hover {
+            background: #43a047;
+        }
+        .reject-btn {
+            background: #f44336;
+        }
+        .reject-btn:hover {
+            background: #e53935;
+        }
+        .approval-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .approval-badge.pending {
+            background: #fff4e5;
+            color: #ef6c00;
+        }
+        .approval-badge.approved {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        .approval-badge.rejected {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        .approval-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.4);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            padding: 20px;
+        }
+        .approval-modal.show {
+            display: flex;
+        }
+        .approval-modal-content {
+            background: #fff;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 420px;
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        .approval-modal-content h2 {
+            margin: 0 0 16px;
+            font-size: 20px;
+            color: #006633;
+        }
+        .approval-modal-content textarea {
+            width: 100%;
+            min-height: 100px;
+            border-radius: 8px;
+            border: 1px solid #d0d0d0;
+            padding: 10px;
+            resize: vertical;
+            font-size: 14px;
+        }
+        .approval-modal-error {
+            color: #d32f2f;
+            font-size: 13px;
+            margin-top: 6px;
+        }
+        .approval-modal-actions {
+            margin-top: 20px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .approval-cancel-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            background: #e0e0e0;
+            color: #333;
+        }
+        .approval-submit-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            background: #f44336;
+            color: #fff;
+        }
+        .approval-submit-btn:hover {
+            background: #e53935;
+        }
+        .approve-btn:disabled,
+        .reject-btn:disabled,
+        .approval-submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .approval-na {
+            color: #666;
+        }
+        .inventory-status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #fff;
+        }
+        .inventory-status-badge.available {
+            background: #4caf50;
+        }
+        .inventory-status-badge.low-stock {
+            background: #ef6c00;
+        }
+        .inventory-status-badge.out-of-stock {
+            background: #d32f2f;
         }
     </style>
 </head>
@@ -257,6 +447,7 @@ if (!$all_transactions) {
                     <?php endif; ?>
                     
                     <?php if ($all_transactions && $all_transactions->num_rows > 0): ?>
+                    <div id="approvalFeedback" class="approval-feedback"></div>
                     <table id="transactionsTable">
                         <thead>
                             <tr>
@@ -266,6 +457,8 @@ if (!$all_transactions) {
                                 <th>Transaction Date</th>
                                 <th>Expected Return</th>
                                 <th>Status</th>
+                                <th>Approval</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -293,7 +486,23 @@ if (!$all_transactions) {
                                     }
                                 }
                             ?>
-                            <tr data-status="<?= $status ?>">
+                            <?php
+                                $isLargeItem = isset($row['item_size']) && strtolower($row['item_size']) === 'large';
+                                $approvalStatus = $row['approval_status'] ?? 'Pending';
+                                $approvalBadgeClass = 'pending';
+                                if ($approvalStatus === 'Pending') {
+                                    $approvalBadgeClass = 'pending';
+                                } elseif ($approvalStatus === 'Rejected') {
+                                    $approvalBadgeClass = 'rejected';
+                                } elseif ($approvalStatus === 'Approved') {
+                                    $approvalBadgeClass = 'approved';
+                                } else {
+                                    $approvalStatus = 'Pending';
+                                }
+                                $showApprovalActions = $isLargeItem && $approvalStatus === 'Pending';
+                                $rowId = 'txn-' . $row['id'];
+                            ?>
+                            <tr id="<?= $rowId ?>" data-status="<?= $status ?>" data-item-size="<?= htmlspecialchars(strtolower($row['item_size'] ?? '')) ?>" data-approval-status="<?= htmlspecialchars($approvalStatus) ?>" data-equipment-name="<?= htmlspecialchars($row['equipment_name']) ?>">
                                 <td>
                                     <strong><?= htmlspecialchars($row['equipment_name']) ?></strong>
                                 </td>
@@ -329,7 +538,31 @@ if (!$all_transactions) {
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <span class="badge <?= $badgeClass ?>"><?= $statusLabel ?></span>
+                                    <span class="badge <?= $badgeClass ?>" data-status-badge><?= $statusLabel ?></span>
+                                </td>
+                                <td>
+                                    <span class="approval-badge <?= $approvalBadgeClass ?>" data-approval-badge><?= htmlspecialchars($approvalStatus) ?></span>
+                                    <div class="approval-meta" data-approval-meta>
+                                        <?php if (!empty($row['approved_by']) && $approvalStatus === 'Approved'): ?>
+                                            <small>Admin ID: <?= htmlspecialchars($row['approved_by']) ?> <?= !empty($row['approved_at']) ? '(' . date('M j, Y g:i A', strtotime($row['approved_at'])) . ')' : '' ?></small>
+                                        <?php elseif ($approvalStatus === 'Rejected' && !empty($row['rejection_reason'])): ?>
+                                            <small class="danger-text">Reason: <?= htmlspecialchars($row['rejection_reason']) ?></small>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                                <td>
+                                    <?php if ($showApprovalActions): ?>
+                                        <div class="approval-actions" data-approval-actions>
+                                            <button class="approval-btn approve-btn" data-action="approve" data-id="<?= $row['id'] ?>">
+                                                <i class="fas fa-check"></i> Approve
+                                            </button>
+                                            <button class="approval-btn reject-btn" data-action="reject" data-id="<?= $row['id'] ?>" data-equipment-name="<?= htmlspecialchars($row['equipment_name']) ?>">
+                                                <i class="fas fa-times"></i> Reject
+                                            </button>
+                                        </div>
+                                    <?php else: ?>
+                                        <span class="approval-na" data-approval-na>—</span>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                             <?php endwhile; ?>
@@ -374,6 +607,20 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         </main>
     </div>
 
+    <div id="rejectionModal" class="approval-modal" role="dialog" aria-modal="true" aria-labelledby="rejectionModalTitle">
+        <div class="approval-modal-content">
+            <h2 id="rejectionModalTitle">Reject Borrow Request</h2>
+            <p id="rejectionModalDesc" style="margin-bottom:12px; color:#444;"></p>
+            <label for="rejectionReason" style="font-weight:600; display:block; margin-bottom:6px;">Reason for rejection</label>
+            <textarea id="rejectionReason" placeholder="Provide a clear reason..." maxlength="500"></textarea>
+            <div id="rejectionError" class="approval-modal-error" role="alert" aria-live="assertive"></div>
+            <div class="approval-modal-actions">
+                <button type="button" class="approval-cancel-btn" id="rejectionCancelBtn">Cancel</button>
+                <button type="button" class="approval-submit-btn" id="rejectionSubmitBtn">Reject Request</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         function logout() {
             localStorage.clear();
@@ -381,6 +628,233 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             window.location.href = 'logout.php';
         }
         
+        const approvalFeedback = document.getElementById('approvalFeedback');
+        const rejectionModal = document.getElementById('rejectionModal');
+        const rejectionReasonInput = document.getElementById('rejectionReason');
+        const rejectionError = document.getElementById('rejectionError');
+        const rejectionCancelBtn = document.getElementById('rejectionCancelBtn');
+        const rejectionSubmitBtn = document.getElementById('rejectionSubmitBtn');
+        const rejectionDesc = document.getElementById('rejectionModalDesc');
+        let rejectionTargetId = null;
+
+        function showFeedback(message, type = 'success') {
+            if (!approvalFeedback) return;
+            approvalFeedback.textContent = message;
+            approvalFeedback.className = `approval-feedback show ${type}`;
+            setTimeout(() => {
+                approvalFeedback.classList.remove('show');
+            }, 4000);
+        }
+
+        function resetRejectionModal() {
+            rejectionTargetId = null;
+            if (rejectionReasonInput) rejectionReasonInput.value = '';
+            if (rejectionError) rejectionError.textContent = '';
+            if (rejectionDesc) rejectionDesc.textContent = '';
+        }
+
+        function closeRejectionModal() {
+            if (rejectionModal) {
+                rejectionModal.classList.remove('show');
+                resetRejectionModal();
+            }
+        }
+
+        function openRejectionModal(transactionId, equipmentName) {
+            rejectionTargetId = transactionId;
+            if (rejectionDesc) {
+                rejectionDesc.textContent = equipmentName
+                    ? `Reject borrow request for "${equipmentName}"`
+                    : 'Reject this borrow request?';
+            }
+            if (rejectionModal) {
+                rejectionModal.classList.add('show');
+            }
+        }
+
+        async function sendApprovalRequest(transactionId, action, reason = '') {
+            const payload = new FormData();
+            payload.append('transaction_id', transactionId);
+            payload.append('action', action);
+            if (reason) {
+                payload.append('reason', reason);
+            }
+
+            const response = await fetch('transaction-approval.php', {
+                method: 'POST',
+                body: payload,
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => null);
+                throw new Error(errorData?.message || 'Request failed');
+            }
+
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.message || 'Unable to update transaction');
+            }
+            return data;
+        }
+
+        const statusMap = {
+            'Active': { label: 'Active', class: 'borrow' },
+            'Returned': { label: 'Returned', class: 'return' },
+            'Overdue': { label: 'Overdue', class: 'violation' },
+            'Rejected': { label: 'Rejected', class: 'rejected' }
+        };
+
+        function updateInventoryStatusFromData(data) {
+            if (!data || !data.inventory) return;
+            const { availability_status } = data.inventory;
+            const row = document.querySelector(`#txn-${data.transaction?.id || data.transaction_id}`);
+            const equipmentCard = row ? document.querySelector(`[data-equipment-card="${row.dataset.equipmentName}"]`) : null;
+            if (!equipmentCard) return;
+            const statusLabel = equipmentCard.querySelector('[data-availability-status]');
+            if (!statusLabel) return;
+            statusLabel.textContent = availability_status || statusLabel.textContent;
+            statusLabel.classList.remove('available', 'low-stock', 'out-of-stock');
+            if (availability_status === 'Low Stock') {
+                statusLabel.classList.add('low-stock');
+            } else if (availability_status === 'Out of Stock') {
+                statusLabel.classList.add('out-of-stock');
+            } else {
+                statusLabel.classList.add('available');
+            }
+        }
+
+        function applyStatusBadge(statusBadgeEl, statusValue) {
+            if (!statusBadgeEl) return;
+            const info = statusMap[statusValue] || { label: statusValue || 'Active', class: 'borrow' };
+            statusBadgeEl.textContent = info.label.toUpperCase();
+            statusBadgeEl.classList.remove('borrow', 'return', 'violation', 'rejected');
+            statusBadgeEl.classList.add(info.class);
+        }
+
+        function updateRowAfterApproval(row, data, action) {
+            if (!row) return;
+            const badge = row.querySelector('[data-approval-badge]');
+            const meta = row.querySelector('[data-approval-meta]');
+            const actions = row.querySelector('[data-approval-actions]');
+            const naPlaceholder = row.querySelector('[data-approval-na]');
+            const statusBadge = row.querySelector('[data-status-badge]');
+            const transaction = data.transaction || {};
+
+            if (badge) {
+                const badgeStatus = transaction.approval_status || (action === 'approve' ? 'Approved' : 'Rejected');
+                badge.textContent = badgeStatus;
+                badge.classList.remove('pending', 'approved', 'rejected');
+                badge.classList.add(badgeStatus === 'Approved' ? 'approved' : badgeStatus === 'Rejected' ? 'rejected' : 'pending');
+            }
+
+            if (meta) {
+                meta.innerHTML = '';
+                if (action === 'approve') {
+                    const approvedInfo = document.createElement('small');
+                    const approvedBy = transaction.approved_by ? `ID: ${transaction.approved_by}` : (data.approver_username ? data.approver_username : 'Admin');
+                    const approvedAt = data.approved_at_display ? ` (${data.approved_at_display})` : '';
+                    approvedInfo.textContent = `Admin ${approvedBy}${approvedAt}`;
+                    meta.appendChild(approvedInfo);
+                } else if (action === 'reject') {
+                    const rejectionInfo = document.createElement('small');
+                    rejectionInfo.className = 'danger-text';
+                    const reason = transaction.rejection_reason || data.rejection_reason || 'Not specified';
+                    rejectionInfo.textContent = `Reason: ${reason}`;
+                    meta.appendChild(rejectionInfo);
+                }
+            }
+
+            if (actions) {
+                actions.remove();
+            }
+            if (naPlaceholder) {
+                naPlaceholder.textContent = '—';
+            }
+
+            row.dataset.approvalStatus = (action === 'approve') ? 'Approved' : 'Rejected';
+            if (transaction.status && statusBadge) {
+                applyStatusBadge(statusBadge, transaction.status);
+            }
+            updateInventoryStatusFromData(data);
+        }
+
+        document.addEventListener('click', async (event) => {
+            const approveBtn = event.target.closest('[data-action="approve"]');
+            const rejectBtn = event.target.closest('[data-action="reject"]');
+
+            if (approveBtn) {
+                const transactionId = approveBtn.dataset.id;
+                const row = approveBtn.closest('tr');
+                const equipmentName = row?.dataset.equipmentName || 'this item';
+
+                approveBtn.disabled = true;
+                const rejectSibling = row?.querySelector('[data-action="reject"]');
+                if (rejectSibling) rejectSibling.disabled = true;
+
+                try {
+                    const result = await sendApprovalRequest(transactionId, 'approve');
+                    updateRowAfterApproval(row, result, 'approve');
+                    showFeedback(`Approved borrow request for ${equipmentName}.`, 'success');
+                } catch (err) {
+                    console.error(err);
+                    showFeedback(err.message || 'Failed to approve request.', 'error');
+                    approveBtn.disabled = false;
+                    if (rejectSibling) rejectSibling.disabled = false;
+                }
+            }
+
+            if (rejectBtn) {
+                const transactionId = rejectBtn.dataset.id;
+                const row = rejectBtn.closest('tr');
+                const equipmentName = row?.dataset.equipmentName || rejectBtn.dataset.equipmentName || '';
+                openRejectionModal(transactionId, equipmentName);
+            }
+        });
+
+        if (rejectionCancelBtn) {
+            rejectionCancelBtn.addEventListener('click', closeRejectionModal);
+        }
+
+        if (rejectionModal) {
+            rejectionModal.addEventListener('click', (event) => {
+                if (event.target === rejectionModal) {
+                    closeRejectionModal();
+                }
+            });
+        }
+
+        if (rejectionSubmitBtn) {
+            rejectionSubmitBtn.addEventListener('click', async () => {
+                if (!rejectionTargetId) {
+                    showFeedback('No transaction selected.', 'error');
+                    return;
+                }
+                const reason = rejectionReasonInput?.value.trim();
+                if (!reason) {
+                    if (rejectionError) {
+                        rejectionError.textContent = 'Please provide a reason for rejecting this request.';
+                    }
+                    return;
+                }
+                rejectionSubmitBtn.disabled = true;
+                try {
+                    const result = await sendApprovalRequest(rejectionTargetId, 'reject', reason);
+                    const row = document.querySelector(`#txn-${rejectionTargetId}`);
+                    updateRowAfterApproval(row, result, 'reject');
+                    showFeedback('Borrow request rejected.', 'success');
+                    closeRejectionModal();
+                } catch (err) {
+                    console.error(err);
+                    if (rejectionError) {
+                        rejectionError.textContent = err.message || 'Failed to reject request.';
+                    }
+                } finally {
+                    rejectionSubmitBtn.disabled = false;
+                }
+            });
+        }
+
         // Current filter
         let currentFilter = 'all';
         

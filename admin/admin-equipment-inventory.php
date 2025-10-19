@@ -245,7 +245,8 @@ $hasEquipment = !empty($equipment_items);
                                      data-name="<?= htmlspecialchars(strtolower($row['name'] ?? '')) ?>"
                                      data-category="<?= htmlspecialchars(strtolower($row['category_name'] ?? '')) ?>"
                                      data-condition="<?= htmlspecialchars(strtolower($row['item_condition'] ?? '')) ?>"
-                                     data-size="<?= htmlspecialchars(strtolower($row['size_category'] ?? '')) ?>">
+                                     data-size="<?= htmlspecialchars(strtolower($row['size_category'] ?? '')) ?>"
+                                     data-equipment-card="<?= htmlspecialchars($row['name']) ?>">
                                     <?php if (!empty($row['image_path'])): ?>
                                         <?php
                                             $image_src = $row['image_path'];
@@ -277,12 +278,10 @@ $hasEquipment = !empty($equipment_items);
                                             $is_low_stock = ($computed_available > 0 && $computed_available <= $min_stock);
                                         ?>
                                         <div class="equipment-qty">
-                                            Quantity: <?= htmlspecialchars($equipment_qty) ?>
-                                            <?php if ($is_out_of_stock): ?>
-                                                <span class="stock-badge out-of-stock">Out of Stock</span>
-                                            <?php elseif ($is_low_stock): ?>
-                                                <span class="stock-badge low-stock">Low Stock</span>
-                                            <?php endif; ?>
+                                            Quantity: <span data-available-quantity><?= htmlspecialchars($equipment_qty) ?></span>
+                                            <span class="stock-badge <?= $is_out_of_stock ? 'out-of-stock' : ($is_low_stock ? 'low-stock' : 'available') ?>" data-availability-status>
+                                                <?= $is_out_of_stock ? 'Out of Stock' : ($is_low_stock ? 'Low Stock' : 'Available') ?>
+                                            </span>
                                         </div>
                                     </div>
                                     <div class="card-actions">

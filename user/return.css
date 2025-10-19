@@ -27,10 +27,68 @@ body {
 	z-index: 1;
 }
 
+
+.rfid-listener {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	border: 0;
+}
+
+.rfid-listener input {
+	border: none;
+}
+
+.return-instructions {
+	background: white;
+	border-radius: 12px;
+	padding: 10px 18px;
+	box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+	margin-bottom: 18px;
+
+}
+
+.return-instructions h2 {
+	margin: 0 0 8px 0;
+	font-size: 1.4rem;
+	color: #1e5631;
+	font-weight: 700;
+}
+
+.return-instructions p {
+	margin: 0;
+	color: #4b5b52;
+	font-size: 1rem;
+	line-height: 1.5;
+}
+
+.scan-status {
+	margin-top: 12px;
+	min-height: 5px;
+	font-size: 0.9rem;
+	font-weight: 600;
+}
+
+.scan-status[data-state="scanning"] {
+	color: #ff9800;
+}
+
+.scan-status[data-state="success"] {
+	color: #2e7d32;
+}
+
+.scan-status[data-state="error"] {
+	color: #c62828;
+}
+
 .return-header {
 	display: flex;
 	justify-content: space-between;
-	align-items: center;
+	align-items: flex-start;
 	margin-bottom: 30px;
 	padding: 20px;
 	background: white;
@@ -42,6 +100,12 @@ body {
 	display: flex;
 	align-items: center;
 	gap: 20px;
+}
+
+.header-actions {
+	display: flex;
+	align-items: center;
+	gap: 16px;
 }
 
 .header-logo-small {
@@ -196,6 +260,12 @@ body {
 
 .return-card {
 	cursor: pointer;
+}
+
+.return-card.highlight {
+	box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.25);
+	transform: translateY(-6px);
+	transition: all 0.3s ease;
 }
 
 .status-badge {

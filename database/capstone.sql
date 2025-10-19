@@ -111,9 +111,15 @@ CREATE TABLE `transactions` (
   `actual_return_date` datetime DEFAULT NULL,
   `condition_before` enum('Excellent', 'Good', 'Fair', 'Poor', 'Out of Service') DEFAULT NULL,
   `condition_after` enum('Excellent', 'Good', 'Fair', 'Poor', 'Out of Service') DEFAULT NULL,
-  `status` enum('Active', 'Returned', 'Overdue', 'Lost', 'Damaged') DEFAULT 'Active',
+  `status` enum('Pending Approval', 'Active', 'Returned', 'Overdue', 'Lost', 'Damaged', 'Rejected') DEFAULT 'Active',
   `penalty_applied` decimal(10,2) DEFAULT 0.00,
   `notes` text DEFAULT NULL,
+  `item_size` enum('Small','Medium','Large') DEFAULT 'Medium',
+  `approval_status` enum('Pending','Approved','Rejected') DEFAULT 'Pending',
+  `approved_by` int(11) DEFAULT NULL,
+  `approved_at` datetime DEFAULT NULL,
+  `rejection_reason` text DEFAULT NULL,
+  `return_review_status` enum('Pending','Verified','Rejected') DEFAULT 'Pending',
   `processed_by` varchar(100) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -122,8 +128,24 @@ CREATE TABLE `transactions` (
   KEY `fk_transactions_equipment` (`equipment_id`),
   KEY `idx_transaction_date` (`transaction_date`),
   KEY `idx_status` (`status`),
+  KEY `idx_approval_status` (`approval_status`),
   CONSTRAINT `fk_transactions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_transactions_equipment` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `fk_transactions_equipment` FOREIGN KEY (`equipment_id`) REFERENCES `equipment` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_transactions_admin` FOREIGN KEY (`approved_by`) REFERENCES `admin_users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+-- Table structure for table `transaction_photos`
+CREATE TABLE `transaction_photos` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `transaction_id` int(11) NOT NULL,
+  `photo_type` enum('return','inspection') DEFAULT 'return',
+  `file_path` varchar(500) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_transaction_photos_transaction` (`transaction_id`),
+  CONSTRAINT `fk_transaction_photos_transaction` FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
