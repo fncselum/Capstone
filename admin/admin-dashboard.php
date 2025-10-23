@@ -94,6 +94,9 @@ if ($db_connected) {
                 <li class="nav-item">
                     <a href="admin-penalty-management.php"><i class="fas fa-gavel"></i><span>Penalty Management</span></a>
                 </li>
+                <li class="nav-item">
+                    <a href="system_monitor.php"><i class="fas fa-heartbeat"></i><span>System Monitor</span></a>
+                </li>
             </ul>
 
             <div class="sidebar-footer">
