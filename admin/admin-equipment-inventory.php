@@ -1,24 +1,31 @@
 <?php
 session_start();
 
+// Set secure session configuration
+ini_set('session.cookie_httponly', 1);
+ini_set('session.use_only_cookies', 1);
+ini_set('session.use_strict_mode', 1);
+
 // Simple authentication check
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit;
 }
 
-// Database connection
-$host = "localhost";
-$user = "root";       
-$password = "";   
-$dbname = "capstone";
+// Include system health and secure database connection
+require_once '../includes/system_health.php';
+require_once '../includes/secure_db_connection.php';
 
-$conn = @new mysqli($host, $user, $password, $dbname);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Initialize secure database connection
+$db = getSecureDB();
+if (!$db) {
+    ErrorHandler::logError("Failed to initialize database connection in equipment inventory");
+    $error_message = "System temporarily unavailable. Please try again later.";
+    $equipment_items = [];
+    $categories = [];
+} else {
+    $conn = $db->getConnection();
 }
-
-$conn->select_db($dbname);
 
 // Handle session messages from add_equipment.php
 $error_message = $_SESSION['error_message'] ?? null;
@@ -84,14 +91,15 @@ if (false && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) &&
     }
 }
 
-// Get categories for filter
+// Get categories for filter with error handling
 $categories = [];
-$category_result = $conn->query("SELECT id, name FROM categories ORDER BY name");
-if ($category_result) {
-    while ($row = $category_result->fetch_assoc()) {
-        $categories[] = $row;
+if ($db) {
+    try {
+        $categories = $db->getRows("SELECT id, name FROM categories ORDER BY name");
+    } catch (Exception $e) {
+        ErrorHandler::logError("Failed to fetch categories", ['error' => $e->getMessage()]);
+        $categories = [];
     }
-    $category_result->free();
 }
 
 // Get stock filter from URL parameter
@@ -101,32 +109,32 @@ if (!in_array($stock_filter, $allowed_filters)) {
     $stock_filter = 'all';
 }
 
-// Build SQL query with stock filter
-$sql = "SELECT e.*, e.size_category, c.name as category_name, 
-        e.quantity as quantity,
-        i.borrowed_quantity, i.item_condition, i.availability_status, i.minimum_stock_level,
-        GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available
-        FROM equipment e 
-        LEFT JOIN categories c ON e.category_id = c.id 
-        LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id";
-
-// Add WHERE clause for stock filtering
-if ($stock_filter === 'available') {
-    $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) > 0";
-} elseif ($stock_filter === 'out_of_stock') {
-    $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) = 0";
-}
-
-$sql .= " ORDER BY e.name";
-
-$equipment_list = $conn->query($sql);
-
+// Build SQL query with stock filter and get equipment items with error handling
 $equipment_items = [];
-if ($equipment_list) {
-    while ($row = $equipment_list->fetch_assoc()) {
-        $equipment_items[] = $row;
+if ($db) {
+    try {
+        $sql = "SELECT e.*, e.size_category, c.name as category_name, 
+                e.quantity as quantity,
+                i.borrowed_quantity, i.item_condition, i.availability_status, i.minimum_stock_level,
+                GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available
+                FROM equipment e 
+                LEFT JOIN categories c ON e.category_id = c.id 
+                LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id";
+
+        // Add WHERE clause for stock filtering
+        if ($stock_filter === 'available') {
+            $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) > 0";
+        } elseif ($stock_filter === 'out_of_stock') {
+            $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) = 0";
+        }
+
+        $sql .= " ORDER BY e.name";
+
+        $equipment_items = $db->getRows($sql);
+    } catch (Exception $e) {
+        ErrorHandler::logError("Failed to fetch equipment items", ['error' => $e->getMessage()]);
+        $equipment_items = [];
     }
-    $equipment_list->free();
 }
 
 $condition_options = ['Excellent', 'Good', 'Fair', 'Poor', 'Out of Service'];
