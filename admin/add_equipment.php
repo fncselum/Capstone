@@ -1,20 +1,27 @@
 <?php
 session_start();
 
+// Include stability framework
+require_once 'includes/error_handler.php';
+require_once 'includes/database_manager.php';
+require_once 'includes/validation.php';
+
+// Initialize error handler
+SystemErrorHandler::init();
+
 // Check if admin is logged in
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+$session_error = SystemValidator::validateAdminSession();
+if ($session_error) {
+    SystemErrorHandler::logSecurityEvent("Unauthorized access attempt to add_equipment.php", [
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown'
+    ]);
     header('Location: login.php');
     exit;
 }
 
 // Include helper function
 require_once 'update_availability_status.php';
-
-// Database configuration
-$host = "localhost";
-$user = "root";
-$password = "";
-$dbname = "capstone";
 
 // Initialize response variables
 $error_message = null;
@@ -23,48 +30,31 @@ $success_message = null;
 // Only process POST requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        // Create PDO connection
-        $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $user, $password);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        // Sanitize input data
+        $form_data = SystemValidator::sanitizeInput($_POST);
         
-        // Validate required fields
-        $name = trim($_POST['name'] ?? '');
-        $rfid_tag = trim($_POST['rfid_tag'] ?? '');
-        $category_id = trim($_POST['category_id'] ?? '');
-        $quantity = trim($_POST['quantity'] ?? '');
-        $description = trim($_POST['description'] ?? '');
-        $image_url = trim($_POST['image_path'] ?? ''); // From form field "image_path" for URL
-        $size_category = trim($_POST['size_category'] ?? '');
-        $allowed_sizes = ['Small', 'Medium', 'Large'];
-        
-        // Validation
-        if (empty($name)) {
-            throw new Exception("Equipment Name is required.");
+        // Validate CSRF token
+        $csrf_error = SystemValidator::validateCSRFToken($form_data['csrf_token'] ?? '');
+        if ($csrf_error) {
+            throw new Exception("Security validation failed. Please refresh the page and try again.");
         }
         
-        if (empty($rfid_tag)) {
-            throw new Exception("RFID Tag is required.");
+        // Validate equipment data
+        $validation_errors = SystemValidator::validateEquipmentData($form_data);
+        if (!empty($validation_errors)) {
+            throw new Exception(implode(' ', $validation_errors));
         }
         
-        if (empty($category_id) || !is_numeric($category_id)) {
-            throw new Exception("Please select a valid Category.");
+        // Validate RFID uniqueness
+        $rfid_error = SystemValidator::validateRfidUniqueness($form_data['rfid_tag']);
+        if ($rfid_error) {
+            throw new Exception($rfid_error);
         }
         
-        if (empty($quantity) || !is_numeric($quantity) || $quantity < 0) {
-            throw new Exception("Please enter a valid Quantity (must be 0 or greater).");
-        }
-
-        if (empty($size_category) || !in_array($size_category, $allowed_sizes, true)) {
-            throw new Exception("Please select a valid item size.");
-        }
-        
-        // Check if RFID tag already exists
-        $stmt = $pdo->prepare("SELECT id, name FROM equipment WHERE rfid_tag = :rfid_tag LIMIT 1");
-        $stmt->execute([':rfid_tag' => $rfid_tag]);
-        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($existing) {
-            throw new Exception("This RFID tag ($rfid_tag) is already used by '" . htmlspecialchars($existing['name']) . "' (ID " . $existing['id'] . ").");
+        // Validate category exists
+        $category_error = SystemValidator::validateCategoryExists($form_data['category_id']);
+        if ($category_error) {
+            throw new Exception($category_error);
         }
         
         // Handle image file upload
@@ -73,31 +63,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] === UPLOAD_ERR_OK) {
             $file = $_FILES['image_file'];
             
-            // Validate file type
-            $allowed_types = ['image/jpeg', 'image/jpg', 'image/png'];
-            $file_type = mime_content_type($file['tmp_name']);
-            
-            if (!in_array($file_type, $allowed_types)) {
-                throw new Exception("Invalid file type. Only JPG, JPEG, and PNG images are allowed.");
-            }
-            
-            // Validate file size (max 5MB)
-            $max_size = 5 * 1024 * 1024; // 5MB in bytes
-            if ($file['size'] > $max_size) {
-                throw new Exception("File size exceeds 5MB limit.");
+            // Validate file upload
+            $file_errors = SystemValidator::validateFileUpload($file);
+            if (!empty($file_errors)) {
+                throw new Exception(implode(' ', $file_errors));
             }
             
             // Create uploads directory if it doesn't exist
             $upload_dir = dirname(__DIR__) . '/uploads/';
             if (!is_dir($upload_dir)) {
-                if (!mkdir($upload_dir, 0777, true)) {
+                if (!mkdir($upload_dir, 0755, true)) {
                     throw new Exception("Failed to create uploads directory.");
                 }
             }
             
             // Generate safe filename
             $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-            $safe_name = preg_replace('/[^a-zA-Z0-9_-]/', '_', strtolower($name));
+            $safe_name = preg_replace('/[^a-zA-Z0-9_-]/', '_', strtolower($form_data['name']));
             $filename = $safe_name . '_' . time() . '.' . $extension;
             $target_path = $upload_dir . $filename;
             
@@ -111,12 +93,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         // If no file uploaded, use image URL if provided
-        if (empty($image_path) && !empty($image_url)) {
-            // Validate URL format
-            if (!filter_var($image_url, FILTER_VALIDATE_URL)) {
-                throw new Exception("Invalid image URL format.");
-            }
-            $image_path = $image_url;
+        if (empty($image_path) && !empty($form_data['image_path'])) {
+            $image_path = $form_data['image_path'];
         }
         
         // Prepare SQL statement with prepared statements for security
@@ -125,35 +103,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES 
                 (:name, :rfid_tag, :category_id, :quantity, :size_category, :description, :image_path, NOW(), NOW())";
         
-        $stmt = $pdo->prepare($sql);
-        
-        // Execute with bound parameters
-        $result = $stmt->execute([
-            ':name' => $name,
-            ':rfid_tag' => $rfid_tag,
-            ':category_id' => (int)$category_id,
-            ':quantity' => (int)$quantity,
-            ':size_category' => $size_category,
-            ':description' => $description,
+        // Execute with bound parameters using DatabaseManager
+        $result = DatabaseManager::execute($sql, [
+            ':name' => $form_data['name'],
+            ':rfid_tag' => $form_data['rfid_tag'],
+            ':category_id' => (int)$form_data['category_id'],
+            ':quantity' => (int)$form_data['quantity'],
+            ':size_category' => $form_data['size_category'],
+            ':description' => $form_data['description'],
             ':image_path' => $image_path
         ]);
         
         if ($result) {
-            $new_equipment_id = $pdo->lastInsertId();
+            $new_equipment_id = DatabaseManager::getConnection()->lastInsertId();
             
             // Automatically insert into inventory table
             try {
                 // Check if inventory record already exists (shouldn't happen, but just in case)
-                $stmt = $pdo->prepare("SELECT id FROM inventory WHERE equipment_id = :equipment_id LIMIT 1");
-                $stmt->execute([':equipment_id' => $rfid_tag]);
+                $existing_inventory = DatabaseManager::fetchOne(
+                    "SELECT id FROM inventory WHERE equipment_id = :equipment_id LIMIT 1",
+                    [':equipment_id' => $form_data['rfid_tag']]
+                );
                 
-                if ($stmt->rowCount() === 0) {
+                if (!$existing_inventory) {
                     // Determine availability status based on quantity
                     $availability_status = ((int)$quantity > 0) ? 'Available' : 'Out of Stock';
                     
                     // Get all columns in inventory table to build dynamic query
-                    $columns_query = $pdo->query("SHOW COLUMNS FROM inventory");
-                    $existing_columns = $columns_query->fetchAll(PDO::FETCH_COLUMN);
+                    $existing_columns = DatabaseManager::getTableColumns('inventory');
+                    $column_names = array_column($existing_columns, 'column_name');
                     
                     // Build SQL based on available columns
                     $fields = ['equipment_id', 'quantity', 'available_quantity'];
@@ -165,60 +143,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ];
                     
                     // Add optional columns if they exist
-                    if (in_array('borrowed_quantity', $existing_columns)) {
+                    if (in_array('borrowed_quantity', $column_names)) {
                         $fields[] = 'borrowed_quantity';
                         $values[] = ':borrowed_quantity';
                         $params[':borrowed_quantity'] = 0;
                     }
                     
-                    if (in_array('damaged_quantity', $existing_columns)) {
+                    if (in_array('damaged_quantity', $column_names)) {
                         $fields[] = 'damaged_quantity';
                         $values[] = ':damaged_quantity';
                         $params[':damaged_quantity'] = 0;
                     }
                     
-                    if (in_array('item_condition', $existing_columns)) {
+                    if (in_array('item_condition', $column_names)) {
                         $fields[] = 'item_condition';
                         $values[] = ':item_condition';
                         $params[':item_condition'] = 'Good';
                     }
 
-                    if (in_array('item_size', $existing_columns)) {
+                    if (in_array('item_size', $column_names)) {
                         $fields[] = 'item_size';
                         $values[] = ':item_size';
-                        $params[':item_size'] = $size_category;
+                        $params[':item_size'] = $form_data['size_category'];
                     }
                     
-                    if (in_array('availability_status', $existing_columns)) {
+                    if (in_array('availability_status', $column_names)) {
                         $fields[] = 'availability_status';
                         $values[] = ':availability_status';
                         $params[':availability_status'] = $availability_status;
                     }
                     
-                    if (in_array('minimum_stock_level', $existing_columns)) {
+                    if (in_array('minimum_stock_level', $column_names)) {
                         $fields[] = 'minimum_stock_level';
                         $values[] = ':minimum_stock_level';
                         $params[':minimum_stock_level'] = 1;
                     }
                     
-                    if (in_array('location', $existing_columns)) {
+                    if (in_array('location', $column_names)) {
                         $fields[] = 'location';
                         $values[] = ':location';
                         $params[':location'] = null;
                     }
                     
-                    if (in_array('notes', $existing_columns)) {
+                    if (in_array('notes', $column_names)) {
                         $fields[] = 'notes';
                         $values[] = ':notes';
                         $params[':notes'] = null;
                     }
                     
-                    if (in_array('last_updated', $existing_columns)) {
+                    if (in_array('last_updated', $column_names)) {
                         $fields[] = 'last_updated';
                         $values[] = 'NOW()';
                     }
                     
-                    if (in_array('created_at', $existing_columns)) {
+                    if (in_array('created_at', $column_names)) {
                         $fields[] = 'created_at';
                         $values[] = 'NOW()';
                     }
@@ -227,19 +205,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $inventory_sql = "INSERT INTO inventory (" . implode(', ', $fields) . ") 
                                      VALUES (" . implode(', ', $values) . ")";
                     
-                    $inventory_stmt = $pdo->prepare($inventory_sql);
-                    $inventory_stmt->execute($params);
+                    DatabaseManager::execute($inventory_sql, $params);
                     
                     // Automatically update availability_status
-                    updateAvailabilityStatus($pdo, $rfid_tag);
+                    updateAvailabilityStatus(DatabaseManager::getConnection(), $form_data['rfid_tag']);
                     
-                    error_log("Inventory record created successfully for equipment RFID: $rfid_tag");
+                    SystemErrorHandler::logApplicationError("Inventory record created successfully for equipment RFID: " . $form_data['rfid_tag']);
                 } else {
-                    error_log("Inventory record already exists for equipment RFID: $rfid_tag");
+                    SystemErrorHandler::logApplicationError("Inventory record already exists for equipment RFID: " . $form_data['rfid_tag']);
                 }
-            } catch (PDOException $e) {
+            } catch (Exception $e) {
                 // Log error but don't fail the entire operation
-                error_log("Inventory insert failed: " . $e->getMessage());
+                SystemErrorHandler::logApplicationError("Inventory insert failed: " . $e->getMessage());
                 // Optionally, you could throw an exception here if inventory sync is critical
                 // throw new Exception("Equipment added but failed to create inventory record: " . $e->getMessage());
             }
@@ -254,11 +231,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception("Failed to add equipment to database.");
         }
         
-    } catch (PDOException $e) {
-        $error_message = "Database error: " . $e->getMessage();
-        error_log("Database error in add_equipment.php: " . $e->getMessage());
     } catch (Exception $e) {
         $error_message = $e->getMessage();
+        SystemErrorHandler::logApplicationError("Equipment addition failed: " . $e->getMessage(), [
+            'form_data' => $form_data,
+            'file' => __FILE__,
+            'line' => __LINE__
+        ]);
     }
     
     // If we got here, there was an error - store it in session and redirect back
