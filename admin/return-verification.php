@@ -1,0 +1,160 @@
+<?php
+session_start();
+header('Content-Type: application/json');
+
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+    exit;
+}
+
+$adminId = $_SESSION['admin_id'] ?? null;
+$adminName = $_SESSION['admin_username'] ?? 'Admin';
+if (!$adminId) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+    exit;
+}
+
+$transactionId = isset($_POST['transaction_id']) ? (int)$_POST['transaction_id'] : 0;
+$action = isset($_POST['action']) ? strtolower(trim($_POST['action'])) : '';
+$notesInput = trim($_POST['notes'] ?? '');
+$detectedIssues = trim($_POST['detected_issues'] ?? '');
+
+if ($transactionId <= 0 || !in_array($action, ['verify', 'flag', 'reject'], true)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Invalid request']);
+    exit;
+}
+
+$requiresNotes = in_array($action, ['flag', 'reject'], true);
+if ($requiresNotes && $notesInput === '') {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Please provide notes for this action.']);
+    exit;
+}
+
+$host = 'localhost';
+$user = 'root';
+$password = '';
+$dbname = 'capstone';
+
+$conn = @new mysqli($host, $user, $password, $dbname);
+if ($conn->connect_error) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+    exit;
+}
+
+$conn->set_charset('utf8mb4');
+
+try {
+    $conn->begin_transaction();
+
+    $stmt = $conn->prepare("SELECT * FROM transactions WHERE id = ? FOR UPDATE");
+    if (!$stmt) {
+        throw new Exception('Failed to prepare transaction lookup.');
+    }
+    $stmt->bind_param('i', $transactionId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows !== 1) {
+        throw new Exception('Transaction not found.');
+    }
+    $transaction = $result->fetch_assoc();
+    $stmt->close();
+
+    if ($transaction['transaction_type'] !== 'Borrow') {
+        throw new Exception('Only borrow transactions can be reviewed.');
+    }
+
+    $currentVerification = $transaction['return_verification_status'] ?? 'Pending';
+    $currentReviewStatus = $transaction['return_review_status'] ?? 'Pending';
+    $currentStatus = $transaction['status'] ?? 'Active';
+
+    $newVerification = $currentVerification;
+    $newReviewStatus = $currentReviewStatus;
+    $newTransactionStatus = $currentStatus;
+
+    // Handle different verification actions
+    if ($action === 'verify') {
+        $newVerification = 'Verified';
+        $newReviewStatus = 'Verified';
+        if (in_array(strtolower($currentStatus), ['pending review', 'returned', 'active'])) {
+            $newTransactionStatus = 'Returned';
+        }
+        $message = 'Return verified successfully.';
+    } elseif ($action === 'flag') {
+        $newVerification = 'Flagged';
+        $newReviewStatus = 'Pending';
+        $newTransactionStatus = in_array(strtolower($currentStatus), ['active', 'pending review']) ? 'Pending Review' : $currentStatus;
+        $message = 'Return flagged for additional review.';
+    } else { // reject
+        $newVerification = 'Rejected';
+        $newReviewStatus = 'Rejected';
+        $newTransactionStatus = 'Rejected';
+        $message = 'Return rejected.';
+    }
+    
+    // Validate status transition
+    if ($currentVerification === 'Not Yet Returned' && $newVerification !== 'Pending') {
+        throw new Exception('Cannot verify/flag/reject an item that has not been returned yet.');
+    }
+
+    $existingNotes = $transaction['notes'] ?? '';
+    if (!is_string($existingNotes)) {
+        $existingNotes = '';
+    }
+
+    $noteFragment = '';
+    if ($action === 'verify') {
+        $noteFragment = "Return verified by Admin {$adminName}.";
+    } elseif ($action === 'flag') {
+        $noteFragment = "Return flagged by Admin {$adminName}: {$notesInput}";
+    } else {
+        $noteFragment = "Return rejected by Admin {$adminName}: {$notesInput}";
+    }
+
+    $newNotes = trim($existingNotes);
+    if ($noteFragment !== '') {
+        $newNotes = $newNotes === '' ? $noteFragment : $newNotes . ' | ' . $noteFragment;
+    }
+
+    $update = $conn->prepare("UPDATE transactions SET status = ?, return_verification_status = ?, return_review_status = ?, processed_by = ?, notes = ?, detected_issues = ?, updated_at = NOW() WHERE id = ?");
+    if (!$update) {
+        throw new Exception('Failed to prepare update statement.');
+    }
+    $update->bind_param('sssissi', $newTransactionStatus, $newVerification, $newReviewStatus, $adminId, $newNotes, $detectedIssues, $transactionId);
+    if (!$update->execute() || $update->affected_rows !== 1) {
+        throw new Exception('Failed to update transaction.');
+    }
+    $update->close();
+
+    $conn->commit();
+
+    echo json_encode([
+        'success' => true,
+        'message' => $message,
+        'transaction' => [
+            'id' => $transactionId,
+            'status' => $newTransactionStatus,
+            'return_verification_status' => $newVerification,
+            'return_review_status' => $newReviewStatus,
+            'similarity_score' => $transaction['similarity_score'],
+            'detected_issues' => $detectedIssues,
+        ],
+        'display' => [
+            'status' => $newTransactionStatus,
+            'verification_status' => $newVerification,
+            'review_status' => $newReviewStatus,
+            'similarity_score' => $transaction['similarity_score'],
+            'detected_issues' => $detectedIssues,
+        ],
+    ]);
+    exit;
+} catch (Exception $ex) {
+    $conn->rollback();
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => $ex->getMessage()]);
+    exit;
+}

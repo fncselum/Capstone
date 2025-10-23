@@ -120,6 +120,8 @@ CREATE TABLE `transactions` (
   `approved_at` datetime DEFAULT NULL,
   `rejection_reason` text DEFAULT NULL,
   `return_review_status` enum('Pending','Verified','Rejected') DEFAULT 'Pending',
+  `similarity_score` float DEFAULT NULL,
+  `return_verification_status` enum('Pending','Verified','Flagged','Rejected') DEFAULT 'Pending',
   `processed_by` varchar(100) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -136,11 +138,10 @@ CREATE TABLE `transactions` (
 
 -- --------------------------------------------------------
 
--- Table structure for table `transaction_photos`
 CREATE TABLE `transaction_photos` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `transaction_id` int(11) NOT NULL,
-  `photo_type` enum('return','inspection') DEFAULT 'return',
+  `photo_type` enum('borrow','return','inspection','comparison','reference') DEFAULT 'return',
   `file_path` varchar(500) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

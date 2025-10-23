@@ -35,19 +35,20 @@ if ($db_connected) {
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'return') {
 		$transaction_id = (int)($_POST['transaction_id'] ?? 0);
 		$condition_after = trim($_POST['condition_after'] ?? 'Good');
-		
+		$return_photo_data = $_POST['return_photo'] ?? '';
+
 		if ($transaction_id > 0) {
 			$conn->begin_transaction();
 			try {
 				// Get transaction and inventory details with lock
 				$stmt = $conn->prepare("SELECT t.*, e.name as equipment_name, e.quantity as current_qty,
-					i.available_quantity, i.minimum_stock_level,
-					i.borrowed_quantity, i.damaged_quantity, i.equipment_id AS inventory_equipment_id,
-					e.rfid_tag
-					FROM transactions t 
-					JOIN equipment e ON t.equipment_id = e.id 
-					LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
-					WHERE t.id = ? AND t.user_id = ? AND t.transaction_type = 'Borrow' AND t.status = 'Active' FOR UPDATE");
+				i.available_quantity, i.minimum_stock_level,
+				i.borrowed_quantity, i.damaged_quantity, i.equipment_id AS inventory_equipment_id,
+				e.rfid_tag
+				FROM transactions t 
+				JOIN equipment e ON t.equipment_id = e.rfid_tag 
+				LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
+				WHERE t.id = ? AND t.user_id = ? AND t.transaction_type = 'Borrow' AND t.status = 'Active' FOR UPDATE");
 				$stmt->bind_param("ii", $transaction_id, $user_id);
 				$stmt->execute();
 				$result = $stmt->get_result();
@@ -119,50 +120,251 @@ if ($db_connected) {
 
 					// Equipment table already reflects total quantity; inventory handles availability tracking.
 					
-					// Update transaction record
-					$actual_return_date = date('Y-m-d H:i:s');
-					$status = 'Returned';
-					$notes = $transaction['notes'] . " | Returned via kiosk by student ID: " . $student_id;
-					
-					$update_trans = $conn->prepare("UPDATE transactions 
-						SET actual_return_date = ?, 
-							condition_after = ?, 
-							status = ?, 
-							penalty_applied = ?,
-							notes = ?,
-							updated_at = NOW() 
-						WHERE id = ?");
-					
-					$update_trans->bind_param("sssisi", 
-						$actual_return_date,
-						$condition_after,
-						$status,
-						$penalty,
-						$notes,
-						$transaction_id
-					);
-					
-					if (!$update_trans->execute()) {
-						throw new Exception("Failed to update transaction: " . $update_trans->error);
+					$returnPhotoPath = null;
+					$returnPhotoAbsolute = null;
+					if (!empty($return_photo_data) && strpos($return_photo_data, 'data:image') === 0) {
+						$suffix = time() . '_' . $transaction_id . '.jpg';
+						$relativeDir = 'uploads/transaction_photos/';
+						$absoluteDir = realpath(__DIR__ . '/../') . DIRECTORY_SEPARATOR . $relativeDir;
+						if (!is_dir($absoluteDir)) {
+							if (!mkdir($absoluteDir, 0755, true) && !is_dir($absoluteDir)) {
+								throw new Exception('Failed to create photo directory.');
+							}
+						}
+
+						$rawData = explode(',', $return_photo_data, 2);
+						$decoded = base64_decode($rawData[1] ?? '', true);
+						if ($decoded === false) {
+							throw new Exception('Invalid return photo data.');
+						}
+
+						$returnPhotoAbsolute = $absoluteDir . $suffix;
+						if (file_put_contents($returnPhotoAbsolute, $decoded) === false) {
+							throw new Exception('Failed to save return photo.');
+						}
+						$returnPhotoPath = $relativeDir . $suffix;
+
+						$photoStmt = $conn->prepare("INSERT INTO transaction_photos (transaction_id, photo_type, file_path, created_at) VALUES (?, 'return', ?, NOW())");
+						if ($photoStmt) {
+							$photoStmt->bind_param('is', $transaction_id, $returnPhotoPath);
+							$photoStmt->execute();
+							$photoStmt->close();
+						}
 					}
+
+					$comparisonPhotoPath = null;
+					$similarityScore = null;
+					$verificationStatus = 'Pending';
+					$reviewStatus = 'Pending';
+					$comparisonResults = [];
+
+					if (!empty($returnPhotoPath) && $returnPhotoAbsolute && file_exists($returnPhotoAbsolute)) {
+						$referenceBase = null;
+
+						$sizeCategory = strtolower($transaction['item_size'] ?? 'medium');
+
+						if ($sizeCategory === 'large') {
+							$borrowPhotoStmt = $conn->prepare("SELECT file_path FROM transaction_photos WHERE transaction_id = ? AND photo_type = 'borrow' ORDER BY id ASC LIMIT 1");
+							if ($borrowPhotoStmt) {
+								$borrowPhotoStmt->bind_param('i', $transaction_id);
+								$borrowPhotoStmt->execute();
+								$borrowResult = $borrowPhotoStmt->get_result();
+								$borrowRow = $borrowResult ? $borrowResult->fetch_assoc() : null;
+								if ($borrowRow && !empty($borrowRow['file_path'])) {
+									$referenceBase = $borrowRow['file_path'];
+								}
+								$borrowPhotoStmt->close();
+							}
+						} else {
+							if (!empty($transaction['image_path'])) {
+								$referenceBase = $transaction['image_path'];
+							}
+						}
+
+						$rootPath = realpath(__DIR__ . '/../');
+						$referenceFullPath = null;
+						if (!empty($referenceBase)) {
+							$candidatePaths = [];
+							$candidatePaths[] = $rootPath . DIRECTORY_SEPARATOR . ltrim($referenceBase, '/\\');
+							if (strpos($referenceBase, '../') === 0) {
+								$trimmed = ltrim(substr($referenceBase, 3), '/\\');
+								$candidatePaths[] = $rootPath . DIRECTORY_SEPARATOR . $trimmed;
+							}
+							$realReference = realpath($referenceBase);
+							if ($realReference !== false) {
+								$candidatePaths[] = $realReference;
+							}
+							foreach ($candidatePaths as $pathCandidate) {
+								if ($pathCandidate && file_exists($pathCandidate)) {
+									$referenceFullPath = $pathCandidate;
+									break;
+								}
+							}
+						}
+
+						if ($referenceFullPath) {
+							$comparisonDir = $rootPath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'transaction_photos' . DIRECTORY_SEPARATOR;
+							if (!is_dir($comparisonDir)) {
+								if (!mkdir($comparisonDir, 0755, true) && !is_dir($comparisonDir)) {
+									throw new Exception('Failed to create comparison directory.');
+								}
+							}
+                            
+                            // Include the image comparison library
+                            require_once __DIR__ . '/../includes/image_comparison.php';
+                            
+                            // Skip comparison for large items (manual review only)
+                            if ($sizeCategory !== 'large') {
+                                // Perform image comparison
+                                if (function_exists('analyzeImageDifferences')) {
+                                    $comparisonResults = analyzeImageDifferences($referenceFullPath, $returnPhotoAbsolute);
+                                    $similarityScore = $comparisonResults['similarity'] ?? null;
+                                    
+                                    // Store comparison results in transaction_meta
+                                    if (!empty($comparisonResults)) {
+                                        $metaStmt = $conn->prepare("
+                                            INSERT INTO transaction_meta (transaction_id, meta_key, meta_value, created_at)
+                                            VALUES (?, 'image_comparison', ?, NOW())
+                                            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = NOW()
+                                        ");
+                                        $metaJson = json_encode($comparisonResults);
+                                        $metaStmt->bind_param('is', $transaction_id, $metaJson);
+                                        $metaStmt->execute();
+                                        $metaStmt->close();
+                                        
+                                        // Handle verification based on item size and similarity score
+                                        if ($sizeCategory === 'small' && $similarityScore >= 85) {
+                                            // Auto-verify small items with high similarity
+                                            $verificationStatus = 'Verified';
+                                            $reviewStatus = 'Verified';
+                                            $finalStatus = 'Returned';
+                                            $notes .= "\n[System] Auto-verified return (Similarity: " . round($similarityScore, 2) . "%)";
+                                        } elseif ($sizeCategory === 'medium' && $similarityScore >= 85) {
+                                            // Flag for admin review for medium items
+                                            $verificationStatus = 'Pending';
+                                            $reviewStatus = 'Pending Review';
+                                            $notes .= "\n[System] Pending admin review (Similarity: " . round($similarityScore, 2) . "%)";
+                                        } else {
+                                            // Flag for review if similarity is below threshold
+                                            $verificationStatus = 'Pending';
+                                            $reviewStatus = 'Review Required';
+                                            $notes .= "\n[System] Review required (Similarity: " . round($similarityScore, 2) . "%)";
+                                        }
+                                        
+                                        // Generate comparison preview
+                                        $comparisonFile = $comparisonDir . 'comparison_' . time() . '_' . $transaction_id . '.jpg';
+                                        if (generateComparisonPreview($referenceFullPath, $returnPhotoAbsolute, $comparisonFile)) {
+                                            $comparisonPhotoPath = 'uploads/transaction_photos/' . basename($comparisonFile);
+                                            $comparisonStmt = $conn->prepare("
+                                                INSERT INTO transaction_photos (transaction_id, photo_type, file_path, created_at) 
+                                                VALUES (?, 'comparison', ?, NOW())
+                                                ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), updated_at = NOW()
+                                            
+                                            ");
+                                            if ($comparisonStmt) {
+                                                $comparisonStmt->bind_param('is', $transaction_id, $comparisonPhotoPath);
+                                                $comparisonStmt->execute();
+                                                $comparisonStmt->close();
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                // For large items, set to manual review
+                                $verificationStatus = 'Pending';
+                                $reviewStatus = 'Manual Review Required';
+                                $notes .= "\n[System] Large item - Manual review required";
+                            }
+						}
+					}
+
+					// Update transaction with verification and review status
+					$finalStatus = 'Returned';
+					$actual_return_date = date('Y-m-d H:i:s');
+					$existingNotes = $transaction['notes'] ?? '';
+					if (!is_string($existingNotes)) {
+						$existingNotes = '';
+					}
+					$notes = $existingNotes . "\n[System] Return processed at " . $actual_return_date;
+
+					$updateStatus = $conn->prepare("UPDATE transactions SET 
+						transaction_type = 'Return',
+						status = 'Returned',
+						actual_return_date = ?,
+						condition_after = ?,
+						penalty_applied = ?,
+						notes = CONCAT(IFNULL(notes, ''), ?),
+						return_verification_status = ?,
+						return_review_status = ?,
+						updated_at = NOW()
+					WHERE id = ?") or die($conn->error);
 					
+					if ($updateStatus) {
+						$updateStatus->bind_param('ssssssi', 
+							$actual_return_date,
+							$condition_after,
+							$penalty,
+							$notes,
+							$verificationStatus,
+							$reviewStatus,
+							$transaction_id
+						);
+						if (!$updateStatus->execute()) {
+							throw new Exception("Failed to update transaction status: " . $updateStatus->error);
+						}
+						$updateStatus->close();
+					} else {
+						throw new Exception("Failed to prepare status update query");
+					}
+
+					// Create a new return transaction record
+					$returnStmt = $conn->prepare("INSERT INTO transactions (
+						user_id, equipment_id, item_size, transaction_type, quantity,
+						transaction_date, expected_return_date, actual_return_date,
+						condition_before, condition_after, status, approval_status,
+						penalty_applied, notes, return_verification_status,
+						created_at, updated_at
+					) VALUES (
+						?, ?, ?, 'Return', ?,
+						NOW(), ?, ?,
+						?, ?, 'Returned', 'Approved',
+						?, ?, ?,
+						NOW(), NOW()
+					)");
+
+					if ($returnStmt) {
+						$returnStmt->bind_param('iississssss',
+							$user_id,
+							$equipment_id,
+							$transaction['item_size'],
+							$transaction['quantity'],
+							$transaction['expected_return_date'],
+							$actual_return_date,
+							$transaction['condition_before'],
+							$condition_after,
+							$penalty,
+							$notes,
+							$verificationStatus
+						);
+
+						if (!$returnStmt->execute()) {
+							throw new Exception("Failed to create return transaction: " . $returnStmt->error);
+						}
+						$returnStmt->close();
+					}
+
+					$conn->commit();
+					
+					// Success message
+					$message = "Equipment returned successfully!<br><strong>$equipment_name</strong><br>Transaction ID: #$transaction_id";
 					// Update user penalty points if overdue
 					if ($penalty > 0) {
 						$update_penalty = $conn->prepare("UPDATE users SET penalty_points = penalty_points + ? WHERE id = ?");
 						$update_penalty->bind_param("ii", $penalty, $user_id);
 						$update_penalty->execute();
 						$update_penalty->close();
-					}
-					
-					$conn->commit();
-					
-					// Success message
-					$message = "Equipment returned successfully!<br><strong>$equipment_name</strong><br>Transaction ID: #$transaction_id";
-					if ($penalty > 0) {
 						$message .= "<br><span style='color: #ff9800;'>⚠ Overdue penalty: $penalty points</span>";
 					}
-					
-					$update_trans->close();
 				} else {
 					$conn->rollback();
 					$error = 'Transaction not found or already returned.';
@@ -189,7 +391,7 @@ if ($db_connected) {
 						ELSE 'On Time'
 					 END as status_text
 			  FROM transactions t
-			  JOIN equipment e ON t.equipment_id = e.id
+			  JOIN equipment e ON t.equipment_id = e.rfid_tag
 			  LEFT JOIN categories c ON e.category_id = c.id
 			  WHERE t.user_id = ?
 			  AND t.status = 'Active' 

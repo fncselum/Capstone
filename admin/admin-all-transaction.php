@@ -23,6 +23,7 @@ $conn->select_db($dbname);
 
 $conn->query("UPDATE transactions SET approval_status = 'Approved' WHERE status <> 'Pending Approval' AND (approval_status = 'Pending' OR approval_status IS NULL)");
 
+
 // Check if users table exists
 $users_table_exists = false;
 $check_users = $conn->query("SHOW TABLES LIKE 'users'");
@@ -59,6 +60,7 @@ if ($users_table_exists) {
     $query = "SELECT t.*, 
                 COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                 e.name as equipment_name,
+                e.image_path as equipment_image_path,
                 $user_name_col
                 $student_id_col,
                 t.approved_by,
@@ -66,7 +68,7 @@ if ($users_table_exists) {
                 inv.available_quantity AS inventory_available_qty,
                 inv.borrowed_quantity AS inventory_borrowed_qty
          FROM transactions t
-         LEFT JOIN equipment e ON t.equipment_id = e.id
+         LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag
          LEFT JOIN users u ON t.user_id = u.id
          LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
          ORDER BY t.transaction_date DESC";
@@ -75,18 +77,61 @@ if ($users_table_exists) {
     $query = "SELECT t.*, 
                 COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                 e.name as equipment_name,
+                e.image_path as equipment_image_path,
                 t.rfid_id as student_id,
                 t.approved_by,
                 inv.availability_status AS inventory_status,
                 inv.available_quantity AS inventory_available_qty,
                 inv.borrowed_quantity AS inventory_borrowed_qty
          FROM transactions t
-         LEFT JOIN equipment e ON t.equipment_id = e.id
+         LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag
          LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
          ORDER BY t.transaction_date DESC";
 }
 
 $all_transactions = $conn->query($query);
+
+$transactionPhotos = [];
+$photoQuery = $conn->query("SELECT transaction_id, photo_type, file_path FROM transaction_photos WHERE photo_type IN ('borrow','return','comparison','reference')");
+if ($photoQuery) {
+    while ($photoRow = $photoQuery->fetch_assoc()) {
+        $transactionId = (int)$photoRow['transaction_id'];
+        $type = $photoRow['photo_type'] ?? '';
+        $path = $photoRow['file_path'] ?? '';
+        if ($transactionId > 0 && $type !== '' && $path !== '') {
+            if (!isset($transactionPhotos[$transactionId])) {
+                $transactionPhotos[$transactionId] = [];
+            }
+            if (!isset($transactionPhotos[$transactionId][$type])) {
+                $transactionPhotos[$transactionId][$type] = [];
+            }
+            $transactionPhotos[$transactionId][$type][] = $path;
+        }
+    }
+    $photoQuery->free();
+}
+
+if (!function_exists('resolveTransactionPhotoUrl')) {
+    function resolveTransactionPhotoUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+        if (preg_match('/^https?:/i', $path)) {
+            return $path;
+        }
+        return '../' . ltrim($path, '/');
+    }
+}
+
+if (!function_exists('resolvePhotoList')) {
+    function resolvePhotoList(array $paths): array
+    {
+        return array_values(array_filter(array_map(function ($item) {
+            return resolveTransactionPhotoUrl($item);
+        }, $paths ?? [])));
+    }
+}
 
 // Debug: Check for query errors
 if (!$all_transactions) {
@@ -252,6 +297,65 @@ if (!$all_transactions) {
         .reject-btn:hover {
             background: #e53935;
         }
+        .return-verification-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .return-verification-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .return-verification-badge.pending {
+            background: #fff3e0;
+            color: #fb8c00;
+        }
+        .return-verification-badge.not-returned {
+            background: #f3e5f5;
+            color: #6a1b9a;
+        }
+        .return-verification-badge.verified {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        .return-verification-badge.flagged {
+            background: #fff3e0;
+            color: #fb8c00;
+        }
+        .return-verification-badge.rejected {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .return-verification-score {
+            font-size: 0.85em;
+            color: #424242;
+            font-weight: 600;
+        }
+        .view-return-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid #4caf50;
+            background: #ffffff;
+            color: #2e7d32;
+            font-size: 0.85em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+        .view-return-btn:hover {
+            background: #e8f5e9;
+            color: #1b5e20;
+        }
+        .view-return-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         .approval-badge {
             display: inline-block;
             padding: 4px 12px;
@@ -349,6 +453,242 @@ if (!$all_transactions) {
             opacity: 0.6;
             cursor: not-allowed;
         }
+        .flag-btn {
+            background: #fb8c00;
+        }
+        .flag-btn:hover {
+            background: #f57c00;
+        }
+        .return-review-modal {
+            max-width: 820px;
+        }
+        .return-review-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .return-review-header button {
+            background: transparent;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: #444;
+        }
+        .return-review-meta {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .return-review-equipment {
+            font-weight: 600;
+            color: #006633;
+        }
+        .return-review-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .return-review-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .return-review-photo {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .return-review-photo span {
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #424242;
+        }
+        .return-review-photo-frame {
+            position: relative;
+            width: 100%;
+            padding-top: 66%;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .return-review-photo-frame img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        .return-review-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85em;
+            color: #757575;
+            padding: 12px;
+            text-align: center;
+        }
+        .return-review-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .return-review-textarea {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .return-review-textarea textarea {
+            width: 100%;
+            min-height: 80px;
+            border-radius: 8px;
+            border: 1px solid #d0d0d0;
+            padding: 10px;
+            resize: vertical;
+            font-size: 14px;
+        }
+        .return-review-error {
+            color: #c62828;
+            font-size: 0.85em;
+        }
+        .return-review-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .detected-issues-section {
+            margin: 15px 0;
+            padding: 15px;
+            background: linear-gradient(to bottom, #f8f9fa, #f1f3f5);
+            border-left: 4px solid #4e73df;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            width: 100%;
+            box-sizing: border-box;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        @media (max-width: 768px) {
+            .detected-issues-section {
+                padding: 12px;
+                margin: 10px 0;
+            }
+        }
+        .detected-issues-section h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 1em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        @media (max-width: 768px) {
+            .detected-issues-section h4 {
+                font-size: 0.95em;
+                margin-bottom: 8px;
+            }
+        }
+        .detected-issues-section h4:before {
+            content: '\f06a';
+            font-family: 'Font Awesome 5 Free';
+            font-weight: 900;
+            color: #4e73df;
+        }
+        .detected-issues-content {
+            background: #fff;
+            padding: 12px 15px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            min-height: 60px;
+            max-height: 40vh;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            line-height: 1.5;
+            color: #2d3436;
+            font-size: 0.95em;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+            overflow-y: auto;
+            box-sizing: border-box;
+            width: 100%;
+            resize: none;
+            -ms-overflow-style: none;  /* Hide scrollbar for IE and Edge */
+            scrollbar-width: none;  /* Hide scrollbar for Firefox */
+        }
+        .detected-issues-content::-webkit-scrollbar {
+            display: none;  /* Hide scrollbar for Chrome, Safari and Opera */
+        }
+        @media (max-width: 768px) {
+            .detected-issues-content {
+                padding: 10px 12px;
+                font-size: 0.9em;
+                min-height: 50px;
+                max-height: 30vh;
+            }
+        }
+        /* Severity-based styling for detected issues */
+        .detected-issues-section.severity-high {
+            border-left-color: #e74c3c;
+            background: linear-gradient(to bottom, #fef2f2, #fff5f5);
+        }
+        .detected-issues-section.severity-high h4 {
+            color: #c0392b;
+        }
+        .detected-issues-section.severity-high h4:before {
+            color: #e74c3c;
+            content: '\f071';
+        }
+        
+        .detected-issues-section.severity-medium {
+            border-left-color: #f39c12;
+            background: linear-gradient(to bottom, #fff8e6, #fffaf0);
+        }
+        .detected-issues-section.severity-medium h4 {
+            color: #d35400;
+        }
+        .detected-issues-section.severity-medium h4:before {
+            color: #f39c12;
+            content: '\f06a';
+        }
+        
+        .detected-issues-section.severity-low {
+            border-left-color: #3498db;
+        }
+        
+        .detected-issues-section.severity-none {
+            border-left-color: #2ecc71;
+            background: linear-gradient(to bottom, #f0fdf4, #f7fee7);
+        }
+        .detected-issues-section.severity-none h4:before {
+            color: #2ecc71;
+            content: '\f058';
+        }
+
         .approval-na {
             color: #666;
         }
@@ -455,7 +795,8 @@ if (!$all_transactions) {
                                 <th>Student</th>
                                 <th>Quantity</th>
                                 <th>Transaction Date</th>
-                                <th>Expected Return</th>
+                                <th>Return Date</th>
+                                <th>Return Verification</th>
                                 <th>Status</th>
                                 <th>Approval</th>
                                 <th>Actions</th>
@@ -468,15 +809,19 @@ if (!$all_transactions) {
                             while($row = $all_transactions->fetch_assoc()): 
                                 // Determine status based on transaction_type and status
                                 $status = 'borrowed';
-                                $statusLabel = $row['status'] ?? 'Active';
+                                $rowStatus = $row['status'] ?? 'Active';
+                                $statusLabel = $rowStatus;
                                 $badgeClass = 'borrow';
-                                
-                                if ($row['status'] === 'Returned') {
+
+                                if ($rowStatus === 'Returned') {
                                     $status = 'returned';
                                     $statusLabel = 'Returned';
                                     $badgeClass = 'return';
-                                } elseif ($row['transaction_type'] === 'Borrow' && $row['status'] === 'Active') {
-                                    // Check if overdue
+                                } elseif ($rowStatus === 'Pending Review') {
+                                    $status = 'review';
+                                    $statusLabel = 'Pending Review';
+                                    $badgeClass = 'pending-review';
+                                } elseif ($row['transaction_type'] === 'Borrow' && $rowStatus === 'Active') {
                                     if (isset($row['expected_return_date']) && strtotime($row['expected_return_date']) < time()) {
                                         $status = 'overdue';
                                         $statusLabel = 'Overdue';
@@ -501,8 +846,65 @@ if (!$all_transactions) {
                                 }
                                 $showApprovalActions = $isLargeItem && $approvalStatus === 'Pending';
                                 $rowId = 'txn-' . $row['id'];
+
+                                $transactionId = (int)($row['id'] ?? 0);
+                                $photoSet = $transactionPhotos[$transactionId] ?? [];
+                                $returnPhotos = resolvePhotoList($photoSet['return'] ?? []);
+                                $damageDetections = [];
+                                if (!empty($photoSet['detections'] ?? [])) {
+                                    $damageDetections = $photoSet['detections'];
+                                }
+                                $borrowPhotos = resolvePhotoList($photoSet['borrow'] ?? []);
+                                $referencePhotos = resolvePhotoList($photoSet['reference'] ?? []);
+                                $equipmentImageResolved = resolveTransactionPhotoUrl($row['equipment_image_path'] ?? null);
+                                if (empty($referencePhotos) && $equipmentImageResolved) {
+                                    $referencePhotos[] = $equipmentImageResolved;
+                                }
+                                $similarityScore = isset($row['similarity_score']) ? (float)$row['similarity_score'] : null;
+                                $verificationStatus = $row['return_verification_status'] ?? 'Pending';
+                                $reviewStatus = $row['return_review_status'] ?? 'Pending';
+                                $verificationClassMap = [
+            'Not Yet Returned' => 'not-returned',
+            'Pending' => 'pending',
+            'Verified' => 'verified',
+            'Flagged' => 'flagged',
+            'Rejected' => 'rejected'
+        ];
+        $statusLower = strtolower($row['status'] ?? '');
+        $showReturnReviewButton = ($statusLower === 'returned');
+        $verificationBadgeClass = $verificationClassMap[$verificationStatus] ?? 'pending';
+        $displayVerificationText = $verificationStatus ?? 'Pending';
+        $verificationStatusForInfo = $verificationStatus;
+        $reviewStatusForInfo = $reviewStatus;
+
+        if (!$showReturnReviewButton && $verificationStatus !== 'Not Yet Returned') {
+            $verificationBadgeClass = 'not-returned';
+            $displayVerificationText = 'Not Yet Returned';
+            $verificationStatusForInfo = 'Not Yet Returned';
+            if ($reviewStatus !== 'Not Yet Returned') {
+                $reviewStatusForInfo = 'Not Yet Returned';
+            }
+        }
+
+        $canOpenReturnReview = !empty($returnPhotos) || !empty($damageDetections) || !empty($referencePhotos) || !empty($borrowPhotos);
+
+                                $returnInfo = [
+            'transactionId' => $transactionId,
+            'verificationStatus' => $verificationStatusForInfo,
+            'reviewStatus' => $reviewStatusForInfo,
+            'similarityScore' => $similarityScore,
+            'itemSize' => $row['item_size'] ?? null,
+            'equipmentName' => $row['equipment_name'] ?? null,
+            'status' => $row['status'] ?? null,
+            'borrowPhotos' => $borrowPhotos,
+                                    'returnPhotos' => $returnPhotos,
+                                    'detections' => $damageDetections,
+            'referencePhotos' => $referencePhotos,
+                                    'equipmentImage' => $equipmentImageResolved
+                                ];
+                                $returnInfoJson = htmlspecialchars(json_encode($returnInfo, JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8');
                             ?>
-                            <tr id="<?= $rowId ?>" data-status="<?= $status ?>" data-item-size="<?= htmlspecialchars(strtolower($row['item_size'] ?? '')) ?>" data-approval-status="<?= htmlspecialchars($approvalStatus) ?>" data-equipment-name="<?= htmlspecialchars($row['equipment_name']) ?>">
+                            <tr id="<?= $rowId ?>" data-status="<?= $status ?>" data-item-size="<?= htmlspecialchars(strtolower($row['item_size'] ?? '')) ?>" data-approval-status="<?= htmlspecialchars($approvalStatus) ?>" data-equipment-name="<?= htmlspecialchars($row['equipment_name']) ?>" data-return-info="<?= $returnInfoJson ?>">
                                 <td>
                                     <strong><?= htmlspecialchars($row['equipment_name']) ?></strong>
                                 </td>
@@ -531,11 +933,24 @@ if (!$all_transactions) {
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <?php if (!empty($row['expected_return_date'])): ?>
-                                        <?= date('M j, Y g:i A', strtotime($row['expected_return_date'])) ?>
-                                    <?php else: ?>
+                                    <?php if (!empty($row['actual_return_date']) && $row['actual_return_date'] !== '0000-00-00 00:00:00'): ?>
+                                        <?= date('M j, Y g:i A', strtotime($row['actual_return_date'])) ?>
+                                <?php else: ?>
                                         <span style="color:#999;">N/A</span>
-                                    <?php endif; ?>
+                                <?php endif; ?>
+                                </td>
+                                <td data-return-verification>
+                                    <div class="return-verification-cell">
+                                        <span class="return-verification-badge <?= $verificationBadgeClass ?>" data-return-verification-badge><?= htmlspecialchars($displayVerificationText) ?></span>
+                                        <span class="return-verification-score" data-return-verification-score style="<?= $similarityScore === null ? 'display:none;' : '' ?>">
+                                            <?= $similarityScore !== null ? 'Score: ' . number_format($similarityScore, 2) . '%' : '' ?>
+                                        </span>
+                                        <?php if ($showReturnReviewButton): ?>
+                                        <button type="button" class="view-return-btn" data-return-review data-transaction-id="<?= $transactionId ?>" <?= $canOpenReturnReview ? '' : 'disabled' ?>>
+                                            <i class="fas fa-image"></i> Review
+                                        </button>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                                 <td>
                                     <span class="badge <?= $badgeClass ?>" data-status-badge><?= $statusLabel ?></span>
@@ -621,6 +1036,56 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         </div>
     </div>
 
+    <div id="returnReviewModal" class="approval-modal" role="dialog" aria-modal="true" aria-labelledby="returnReviewTitle">
+        <div class="approval-modal-content return-review-modal">
+            <div class="return-review-header">
+                <h2 id="returnReviewTitle">Return Verification</h2>
+                <button type="button" id="returnReviewClose" aria-label="Close review">&times;</button>
+            </div>
+            <div class="return-review-meta">
+                <span class="return-review-equipment" data-review-equipment></span>
+                <div class="return-review-status">
+                    <span class="return-verification-badge pending" data-review-status-badge>Pending</span>
+                    <span class="return-verification-score" data-review-score style="display:none;"></span>
+                    <span class="return-verification-score" data-review-reviewstatus style="display:none;"></span>
+                </div>
+            </div>
+            <div class="return-review-gallery">
+                <div class="return-review-photo">
+                    <span>Reference</span>
+                    <div class="return-review-photo-frame">
+                        <img data-review-photo="reference" alt="Reference photo">
+                        <div class="return-review-placeholder" data-review-placeholder="reference">No photo available</div>
+                    </div>
+                </div>
+                <div class="return-review-photo">
+                    <span>Return</span>
+                    <div class="return-review-photo-frame">
+                        <img data-review-photo="return" alt="Return photo">
+                        <div class="return-review-placeholder" data-review-placeholder="return">No photo available</div>
+                    </div>
+                </div>
+                <!-- Removed duplicate detected issues section -->
+            </div>
+            <div class="return-review-actions">
+                <div class="detected-issues-section">
+                    <h4>Detected Issues</h4>
+                    <div id="detectedIssues" class="detected-issues-content">No issues detected</div>
+                </div>
+                <div class="return-review-buttons">
+                    <button type="button" class="approval-btn approve-btn" data-review-action="verify">Mark Verified</button>
+                    <button type="button" class="approval-btn flag-btn" data-review-action="flag">Flag for Review</button>
+                    <button type="button" class="approval-btn reject-btn" data-review-action="reject">Reject Return</button>
+                </div>
+                <div class="return-review-textarea" data-review-notes-container style="display:none;">
+                    <span style="font-weight:600;">Additional Notes</span>
+                    <textarea id="returnReviewNotes" placeholder="Add additional notes for this action" maxlength="500"></textarea>
+                    <div class="return-review-error" data-review-error style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         function logout() {
             localStorage.clear();
@@ -636,6 +1101,28 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         const rejectionSubmitBtn = document.getElementById('rejectionSubmitBtn');
         const rejectionDesc = document.getElementById('rejectionModalDesc');
         let rejectionTargetId = null;
+        const returnReviewModal = document.getElementById('returnReviewModal');
+        const returnReviewClose = document.getElementById('returnReviewClose');
+        const returnReviewEquipment = document.querySelector('[data-review-equipment]');
+        const returnReviewStatusBadge = document.querySelector('[data-review-status-badge]');
+        const returnReviewScore = document.querySelector('[data-review-score]');
+        const returnReviewStatusText = document.querySelector('[data-review-reviewstatus]');
+        const returnReviewNotesContainer = document.querySelector('[data-review-notes-container]');
+        const returnReviewNotes = document.getElementById('returnReviewNotes');
+        const detectedIssues = document.getElementById('detectedIssues');
+        const returnReviewError = document.querySelector('[data-review-error]');
+        const returnReviewPhotos = {
+            reference: document.querySelector('[data-review-photo="reference"]'),
+            return: document.querySelector('[data-review-photo="return"]')
+        };
+        const returnReviewPlaceholders = {
+            reference: document.querySelector('[data-review-placeholder="reference"]'),
+            return: document.querySelector('[data-review-placeholder="return"]'),
+            comparison: document.querySelector('[data-review-placeholder="comparison"]')
+        };
+        const returnReviewDetections = document.querySelector('[data-review-detections]');
+        const returnReviewActionButtons = document.querySelectorAll('[data-review-action]');
+        let activeReturnReview = null;
 
         function showFeedback(message, type = 'success') {
             if (!approvalFeedback) return;
@@ -644,6 +1131,208 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             setTimeout(() => {
                 approvalFeedback.classList.remove('show');
             }, 4000);
+        }
+
+        function applyVerificationBadgeClass(target, status) {
+            if (!target) return;
+            const normalized = (status || 'Pending').toLowerCase();
+            target.classList.remove('pending', 'verified', 'flagged', 'rejected', 'not-returned');
+            if (normalized === 'not yet returned') {
+                target.classList.add('not-returned');
+            } else if (normalized === 'verified') {
+                target.classList.add('verified');
+            } else if (normalized === 'flagged') {
+                target.classList.add('flagged');
+            } else if (normalized === 'rejected') {
+                target.classList.add('rejected');
+            } else {
+                target.classList.add('pending');
+            }
+            target.textContent = status || 'Pending';
+        }
+
+        function setReturnReviewPhoto(type, urls) {
+            const img = returnReviewPhotos[type];
+            const placeholder = returnReviewPlaceholders[type];
+            if (!img || !placeholder) return;
+            const src = Array.isArray(urls) && urls.length > 0 ? urls[0] : null;
+            if (src) {
+                img.src = src;
+                img.style.display = 'block';
+                placeholder.style.display = 'none';
+            } else {
+                img.removeAttribute('src');
+                img.style.display = 'none';
+                placeholder.style.display = 'flex';
+            }
+        }
+
+        function resetReturnReviewNotes() {
+            if (returnReviewNotes) {
+                returnReviewNotes.value = '';
+            }
+            if (detectedIssues) {
+                const issuesSection = detectedIssues.closest('.detected-issues-section');
+                // Reset all severity classes
+                issuesSection.className = 'detected-issues-section';
+                
+                // Set default detected issues based on similarity score
+                const similarity = activeReturnReview?.similarityScore ?? 100;
+                let issuesText = 'No issues detected';
+                let severityClass = 'severity-none';
+                
+                if (activeReturnReview?.detectedIssues) {
+                    // Use the detected issues from the backend if available
+                    issuesText = activeReturnReview.detectedIssues;
+                    // If we have detected issues, use similarity to determine severity
+                    if (similarity >= 95) {
+                        severityClass = 'severity-none';
+                    } else if (similarity >= 85) {
+                        severityClass = 'severity-low';
+                    } else if (similarity >= 70) {
+                        severityClass = 'severity-medium';
+                    } else {
+                        severityClass = 'severity-high';
+                    }
+                } else {
+                    // Fallback to similarity-based detection
+                    if (similarity >= 95) {
+                        issuesText = 'No visible damage detected';
+                        severityClass = 'severity-none';
+                    } else if (similarity >= 85) {
+                        issuesText = 'Minor wear and tear detected';
+                        severityClass = 'severity-low';
+                    } else if (similarity >= 70) {
+                        issuesText = 'Noticeable damage or differences detected';
+                        severityClass = 'severity-medium';
+                    } else {
+                        issuesText = 'Significant damage or differences detected';
+                        severityClass = 'severity-high';
+                    }
+                }
+                
+                // Apply severity class and set content
+                issuesSection.classList.add(severityClass);
+                detectedIssues.textContent = issuesText;
+                
+                // Add icon based on severity
+                const iconMap = {
+                    'severity-high': 'exclamation-triangle',
+                    'severity-medium': 'exclamation-circle',
+                    'severity-low': 'info-circle',
+                    'severity-none': 'check-circle'
+                };
+                
+                // Update the icon if it exists, or create it
+                let icon = issuesSection.querySelector('.severity-icon');
+                if (!icon) {
+                    icon = document.createElement('i');
+                    icon.className = 'fas severity-icon';
+                    issuesSection.querySelector('h4').prepend(icon);
+                }
+                icon.className = `fas fa-${iconMap[severityClass]} severity-icon`;
+            }
+            
+            if (returnReviewError) {
+                returnReviewError.textContent = '';
+                returnReviewError.style.display = 'none';
+            }
+        }
+
+        function populateReturnReview(info) {
+            if (!info) {
+                activeReturnReview = null;
+                return;
+            }
+            activeReturnReview = info;
+            if (returnReviewEquipment) {
+                returnReviewEquipment.textContent = info.equipmentName || 'Equipment';
+            }
+            applyVerificationBadgeClass(returnReviewStatusBadge, info.verificationStatus);
+            if (returnReviewScore) {
+                if (info.similarityScore !== null && info.similarityScore !== undefined) {
+                    returnReviewScore.textContent = 'Score: ' + Number(info.similarityScore).toFixed(2) + '%';
+                    returnReviewScore.style.display = 'inline-block';
+                } else {
+                    returnReviewScore.textContent = '';
+                    returnReviewScore.style.display = 'none';
+                }
+            }
+            if (returnReviewStatusText) {
+                const reviewStatusDisplay = info.reviewStatus && info.reviewStatus !== 'Pending' ? 'Review status: ' + info.reviewStatus : '';
+                if (reviewStatusDisplay) {
+                    returnReviewStatusText.textContent = reviewStatusDisplay;
+                    returnReviewStatusText.style.display = 'inline-block';
+                } else {
+                    returnReviewStatusText.textContent = '';
+                    returnReviewStatusText.style.display = 'none';
+                }
+            }
+            setReturnReviewPhoto('reference', info.referencePhotos || []);
+            setReturnReviewPhoto('return', info.returnPhotos || []);
+            setReturnReviewDetections(info.detections || [], info.similarityScore);
+            resetReturnReviewNotes();
+            if (returnReviewModal) {
+                returnReviewModal.classList.add('show');
+            }
+        }
+
+        function setReturnReviewDetections(detections = [], similarityScore = null) {
+            if (!returnReviewDetections) return;
+            const placeholder = returnReviewPlaceholders.comparison;
+            const hasDetections = Array.isArray(detections) && detections.length > 0;
+
+            returnReviewDetections.innerHTML = '';
+
+            if (hasDetections) {
+                if (placeholder) {
+                    placeholder.style.display = 'none';
+                }
+                const list = document.createElement('ul');
+                list.className = 'return-review-detections-list';
+
+                detections.forEach((item) => {
+                    const entry = document.createElement('li');
+                    entry.textContent = item.label ? `${item.label}${item.confidence ? ' (' + item.confidence + '%)' : ''}` : item;
+                    list.appendChild(entry);
+                });
+
+                if (similarityScore !== null && similarityScore !== undefined) {
+                    const scoreItem = document.createElement('li');
+                    scoreItem.textContent = `Similarity Score: ${Number(similarityScore).toFixed(2)}%`;
+                    scoreItem.className = 'return-review-detections-score';
+                    list.appendChild(scoreItem);
+                }
+
+                returnReviewDetections.appendChild(list);
+            } else {
+                if (placeholder) {
+                    placeholder.style.display = 'flex';
+                }
+            }
+        }
+
+        function closeReturnReviewModal() {
+            if (returnReviewModal) {
+                returnReviewModal.classList.remove('show');
+            }
+            activeReturnReview = null;
+        }
+
+        function handleReturnReviewButton(action) {
+            if (!action || !activeReturnReview) {
+                return;
+            }
+            if (returnReviewNotesContainer) {
+                if (action === 'flag' || action === 'reject') {
+                    returnReviewNotesContainer.style.display = 'flex';
+                } else {
+                    returnReviewNotesContainer.style.display = 'none';
+                    if (returnReviewNotes) {
+                        returnReviewNotes.value = '';
+                    }
+                }
+            }
         }
 
         function resetRejectionModal() {
@@ -702,7 +1391,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             'Active': { label: 'Active', class: 'borrow' },
             'Returned': { label: 'Returned', class: 'return' },
             'Overdue': { label: 'Overdue', class: 'violation' },
-            'Rejected': { label: 'Rejected', class: 'rejected' }
+            'Rejected': { label: 'Rejected', class: 'rejected' },
+            'Pending Review': { label: 'Pending Review', class: 'violation' },
+            'Pending Approval': { label: 'Pending Approval', class: 'borrow' }
         };
 
         function updateInventoryStatusFromData(data) {
@@ -730,6 +1421,190 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             statusBadgeEl.textContent = info.label.toUpperCase();
             statusBadgeEl.classList.remove('borrow', 'return', 'violation', 'rejected');
             statusBadgeEl.classList.add(info.class);
+        }
+
+        document.addEventListener('click', (event) => {
+            const reviewTrigger = event.target.closest('[data-return-review]');
+            if (reviewTrigger) {
+                const row = reviewTrigger.closest('tr');
+                if (!row) {
+                    return;
+                }
+                let parsed = null;
+                try {
+                    parsed = JSON.parse(row.dataset.returnInfo || '{}');
+                } catch (err) {
+                    parsed = null;
+                }
+                if (!parsed || !parsed.transactionId) {
+                    return;
+                }
+                parsed.rowId = row.id;
+                populateReturnReview(parsed);
+                return;
+            }
+            if (event.target === returnReviewModal) {
+                closeReturnReviewModal();
+            }
+        });
+
+        if (returnReviewClose) {
+            returnReviewClose.addEventListener('click', () => {
+                closeReturnReviewModal();
+            });
+        }
+
+        function setReturnReviewButtonsDisabled(disabled) {
+            returnReviewActionButtons.forEach((btn) => {
+                btn.disabled = !!disabled;
+            });
+        }
+
+        async function submitReturnReview(action) {
+            if (!activeReturnReview) {
+                return;
+            }
+            if (!action) {
+                return;
+            }
+            let notes = '';
+            const requiresNotes = action === 'flag' || action === 'reject';
+            if (requiresNotes && returnReviewNotesContainer) {
+                returnReviewNotesContainer.style.display = 'flex';
+            }
+            if (requiresNotes) {
+                notes = (returnReviewNotes?.value || '').trim();
+                if (!notes) {
+                    if (returnReviewError) {
+                        returnReviewError.textContent = 'Please provide notes before flagging or rejecting this return.';
+                        returnReviewError.style.display = 'block';
+                    }
+                    if (returnReviewNotes) {
+                        returnReviewNotes.focus();
+                    }
+                    return;
+                }
+            } else {
+                if (returnReviewNotesContainer) {
+                    returnReviewNotesContainer.style.display = 'none';
+                }
+            }
+            if (returnReviewError) {
+                returnReviewError.textContent = '';
+                returnReviewError.style.display = 'none';
+            }
+
+            const payload = new FormData();
+            payload.append('transaction_id', activeReturnReview.transactionId);
+            payload.append('action', action);
+            
+            // Detected issues are now read-only and handled by the system
+            // No need to include them in the form submission
+            
+            // Add notes for flag/reject actions
+            if (['flag', 'reject'].includes(action) && returnReviewNotes) {
+                const notes = returnReviewNotes.value.trim();
+                if (notes) {
+                    payload.append('notes', notes);
+                }
+            }
+
+            try {
+                setReturnReviewButtonsDisabled(true);
+                const response = await fetch('return-verification.php', {
+                    method: 'POST',
+                    body: payload,
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    throw new Error('Failed to process review');
+                }
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.message || 'Unable to update return verification');
+                }
+                const row = document.getElementById(activeReturnReview.rowId || `txn-${activeReturnReview.transactionId}`);
+                if (row) {
+                    updateRowReturnVerification(row, data.transaction || {}, data.display || {});
+                }
+                showFeedback(data.message || 'Return verification updated');
+                closeReturnReviewModal();
+            } catch (err) {
+                if (returnReviewError) {
+                    returnReviewError.textContent = err.message || 'Something went wrong.';
+                    returnReviewError.style.display = 'block';
+                }
+            } finally {
+                setReturnReviewButtonsDisabled(false);
+            }
+        }
+
+        returnReviewActionButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                submitReturnReview(btn.dataset.reviewAction);
+            });
+        });
+
+        function deriveRowStatusFlag(status) {
+            const normalized = (status || '').toLowerCase();
+            if (normalized === 'returned') {
+                return 'returned';
+            }
+            if (normalized === 'overdue') {
+                return 'overdue';
+            }
+            return 'borrowed';
+        }
+
+        function updateRowReturnVerification(row, transaction = {}, display = {}) {
+            let verificationStatus = transaction.return_verification_status || display.verification_status || 'Pending';
+            let reviewStatus = transaction.return_review_status || display.review_status || transaction.return_review_status || 'Pending';
+            const finalStatus = transaction.status || display.status || 'Active';
+            let similarityScore = transaction.similarity_score ?? display.similarity_score ?? null;
+            const statusLower = (finalStatus || '').toLowerCase();
+            const forceNotReturned = ['active','pending approval','overdue','lost','damaged'].includes(statusLower);
+
+            if (forceNotReturned) {
+                verificationStatus = 'Not Yet Returned';
+                reviewStatus = 'Not Yet Returned';
+                similarityScore = null;
+            }
+
+            const badge = row.querySelector('[data-return-verification-badge]');
+            const scoreEl = row.querySelector('[data-return-verification-score]');
+            const statusBadge = row.querySelector('[data-status-badge]');
+
+            applyVerificationBadgeClass(badge, verificationStatus);
+            if (scoreEl) {
+                if (similarityScore !== null && similarityScore !== undefined) {
+                    scoreEl.textContent = 'Score: ' + Number(similarityScore).toFixed(2) + '%';
+                    scoreEl.style.display = 'inline-block';
+                } else {
+                    scoreEl.textContent = '';
+                    scoreEl.style.display = 'none';
+                }
+            }
+
+            applyStatusBadge(statusBadge, finalStatus);
+            row.dataset.status = deriveRowStatusFlag(finalStatus);
+
+            let existingInfo = {};
+            try {
+                existingInfo = JSON.parse(row.dataset.returnInfo || '{}');
+            } catch (err) {
+                existingInfo = {};
+            }
+
+            existingInfo.verificationStatus = verificationStatus;
+            existingInfo.reviewStatus = reviewStatus;
+            if (similarityScore !== null && similarityScore !== undefined) {
+                existingInfo.similarityScore = Number(similarityScore);
+            } else {
+                delete existingInfo.similarityScore;
+            }
+            existingInfo.status = finalStatus;
+
+            row.dataset.returnInfo = JSON.stringify(existingInfo);
         }
 
         function updateRowAfterApproval(row, data, action) {

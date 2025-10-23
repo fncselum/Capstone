@@ -33,7 +33,7 @@ if ($conn->connect_error) {
 $conn->set_charset('utf8mb4');
 try {
     $conn->begin_transaction();
-    $stmt = $conn->prepare("SELECT t.*, e.rfid_tag, e.name AS equipment_name, i.available_quantity, i.minimum_stock_level FROM transactions t JOIN equipment e ON t.equipment_id = e.id LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id WHERE t.id = ? FOR UPDATE");
+    $stmt = $conn->prepare("SELECT t.*, e.rfid_tag, e.name AS equipment_name, i.available_quantity, i.minimum_stock_level FROM transactions t JOIN equipment e ON t.equipment_id = e.rfid_tag LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id WHERE t.id = ? FOR UPDATE");
     if (!$stmt) {
         throw new Exception('Failed to prepare transaction lookup: ' . $conn->error);
     }

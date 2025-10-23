@@ -31,7 +31,26 @@ $equipment_list = [];
 $message = null;
 $error = null;
 
+function getDefaultAdminId(mysqli $conn): ?int {
+	$stmt = $conn->prepare("SELECT id FROM admin_users WHERE status = 'Active' ORDER BY id ASC LIMIT 1");
+	if (!$stmt) {
+		return null;
+	}
+	if (!$stmt->execute()) {
+		$stmt->close();
+		return null;
+	}
+	$stmt->bind_result($adminId);
+	$foundId = null;
+	if ($stmt->fetch()) {
+		$foundId = (int)$adminId;
+	}
+	$stmt->close();
+	return $foundId;
+}
+
 if ($db_connected) {
+	$systemAdminId = getDefaultAdminId($conn);
 	// Handle borrow action
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'borrow') {
 		$equipment_id = (int)($_POST['equipment_id'] ?? 0);
@@ -95,19 +114,20 @@ if ($db_connected) {
 							$requiresApproval = (strtolower($item_size) === 'large');
 							$borrow_status = $requiresApproval ? 'Pending Approval' : 'Active';
 							$approval_status = $requiresApproval ? 'Pending' : 'Approved';
-							$approved_by = null;
+							$approved_by = $requiresApproval ? null : $systemAdminId;
 							$approved_at = $requiresApproval ? null : date('Y-m-d H:i:s');
 							$rejection_reason = null;
 							$return_review_status = 'Pending';
+							$processed_by = $systemAdminId;
 							
 							$trans_stmt = $conn->prepare("INSERT INTO transactions 
 								(user_id, equipment_id, transaction_type, quantity, transaction_date, 
-								expected_return_date, condition_before, status, penalty_applied, notes, item_size, approval_status, approved_by, approved_at, rejection_reason, return_review_status, created_at, updated_at) 
-								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
+								expected_return_date, condition_before, status, penalty_applied, notes, item_size, approval_status, approved_by, approved_at, rejection_reason, return_review_status, processed_by, created_at, updated_at) 
+								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
 							
-							$trans_stmt->bind_param("iisisssisssisss", 
+							$trans_stmt->bind_param("ississsisssisssi", 
 								$user_id, 
-								$equipment_id, 
+								$rfid_code, 
 								$transaction_type, 
 								$quantity,
 								$expected_return_date, 
@@ -120,7 +140,8 @@ if ($db_connected) {
 								$approved_by,
 								$approved_at,
 								$rejection_reason,
-								$return_review_status
+								$return_review_status,
+								$processed_by
 							);
 							
 							if ($trans_stmt->execute()) {

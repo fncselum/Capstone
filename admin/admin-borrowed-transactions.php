@@ -24,8 +24,8 @@ $conn->select_db($dbname);
 $borrowed_items = $conn->query(
     "SELECT t.*, e.name as equipment_name 
      FROM transactions t
-     JOIN equipment e ON t.equipment_id = e.id
-     WHERE t.type = 'Borrow'
+     JOIN equipment e ON t.equipment_id = e.rfid_tag
+     WHERE t.transaction_type = 'Borrow' AND t.status = 'Active'
      ORDER BY t.transaction_date DESC"
 );
 ?>

@@ -32,7 +32,7 @@ $stmt = $conn->prepare("SELECT t.id AS transaction_id, t.quantity, t.expected_re
         e.name AS equipment_name, e.rfid_tag,
         TIMESTAMPDIFF(DAY, t.expected_return_date, NOW()) AS days_overdue
     FROM transactions t
-    JOIN equipment e ON t.equipment_id = e.id
+    JOIN equipment e ON t.equipment_id = e.rfid_tag
     WHERE t.user_id = ?
         AND t.transaction_type = 'Borrow'
         AND t.status = 'Active'

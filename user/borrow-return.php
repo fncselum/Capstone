@@ -85,12 +85,6 @@ if (!$conn->connect_error) {
                         <span><strong>Borrowed:</strong> <?= $borrowed_count ?> item(s)</span>
                     </div>
                     <?php endif; ?>
-                    <?php if ($penalty_points > 0): ?>
-                    <div class="user-detail">
-                        <i class="fas fa-exclamation-triangle" style="color: #ff9800;"></i>
-                        <span style="color: #ff9800;"><strong>Penalty:</strong> <?= $penalty_points ?> points</span>
-                    </div>
-                    <?php endif; ?>
                 </div>
                 <button class="logout-btn" onclick="logout()">
                     <i class="fas fa-sign-out-alt"></i> Logout
