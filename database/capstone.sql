@@ -120,6 +120,7 @@ CREATE TABLE `transactions` (
   `approved_at` datetime DEFAULT NULL,
   `rejection_reason` text DEFAULT NULL,
   `return_review_status` enum('Pending','Verified','Rejected') DEFAULT 'Pending',
+  `detected_issues` text DEFAULT NULL,
   `similarity_score` float DEFAULT NULL,
   `return_verification_status` enum('Pending','Verified','Flagged','Rejected') DEFAULT 'Pending',
   `processed_by` varchar(100) DEFAULT NULL,

@@ -217,8 +217,10 @@ if ($db_connected) {
                             if ($sizeCategory !== 'large') {
                                 // Perform image comparison
                                 if (function_exists('analyzeImageDifferences')) {
-                                    $comparisonResults = analyzeImageDifferences($referenceFullPath, $returnPhotoAbsolute);
+                                    $comparisonResults = analyzeImageDifferences($referenceFullPath, $returnPhotoAbsolute, 4, $sizeCategory);
                                     $similarityScore = $comparisonResults['similarity'] ?? null;
+                                    $detectedIssuesText = $comparisonResults['detected_issues_text'] ?? 'No issues detected';
+                                    $severityLevel = $comparisonResults['severity_level'] ?? 'none';
                                     
                                     // Store comparison results in transaction_meta
                                     if (!empty($comparisonResults)) {
@@ -233,13 +235,13 @@ if ($db_connected) {
                                         $metaStmt->close();
                                         
                                         // Handle verification based on item size and similarity score
-                                        if ($sizeCategory === 'small' && $similarityScore >= 85) {
+                                        if ($sizeCategory === 'small' && $similarityScore >= 90) {
                                             // Auto-verify small items with high similarity
                                             $verificationStatus = 'Verified';
                                             $reviewStatus = 'Verified';
                                             $finalStatus = 'Returned';
                                             $notes .= "\n[System] Auto-verified return (Similarity: " . round($similarityScore, 2) . "%)";
-                                        } elseif ($sizeCategory === 'medium' && $similarityScore >= 85) {
+                                        } elseif ($sizeCategory === 'medium' && $similarityScore >= 87) {
                                             // Flag for admin review for medium items
                                             $verificationStatus = 'Pending';
                                             $reviewStatus = 'Pending Review';
@@ -296,17 +298,21 @@ if ($db_connected) {
 						notes = CONCAT(IFNULL(notes, ''), ?),
 						return_verification_status = ?,
 						return_review_status = ?,
+						similarity_score = ?,
+						detected_issues = ?,
 						updated_at = NOW()
 					WHERE id = ?") or die($conn->error);
 					
 					if ($updateStatus) {
-						$updateStatus->bind_param('ssssssi', 
+						$updateStatus->bind_param('ssssssdsi', 
 							$actual_return_date,
 							$condition_after,
 							$penalty,
 							$notes,
 							$verificationStatus,
 							$reviewStatus,
+							$similarityScore,
+							$detectedIssuesText,
 							$transaction_id
 						);
 						if (!$updateStatus->execute()) {

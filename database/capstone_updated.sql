@@ -110,6 +110,7 @@ CREATE TABLE `transactions` (
   `status` enum('Active', 'Returned', 'Overdue', 'Lost', 'Damaged') DEFAULT 'Active',
   `penalty_applied` decimal(10,2) DEFAULT 0.00,
   `notes` text DEFAULT NULL,
+  `detected_issues` text DEFAULT NULL,
   `processed_by` varchar(100) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

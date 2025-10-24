@@ -64,6 +64,8 @@ if ($users_table_exists) {
                 $user_name_col
                 $student_id_col,
                 t.approved_by,
+                t.processed_by,
+                t.detected_issues,
                 inv.availability_status AS inventory_status,
                 inv.available_quantity AS inventory_available_qty,
                 inv.borrowed_quantity AS inventory_borrowed_qty
@@ -80,6 +82,8 @@ if ($users_table_exists) {
                 e.image_path as equipment_image_path,
                 t.rfid_id as student_id,
                 t.approved_by,
+                t.processed_by,
+                t.detected_issues,
                 inv.availability_status AS inventory_status,
                 inv.available_quantity AS inventory_available_qty,
                 inv.borrowed_quantity AS inventory_borrowed_qty
@@ -347,6 +351,37 @@ if (!$all_transactions) {
             font-weight: 600;
             cursor: pointer;
             transition: background 0.2s ease, color 0.2s ease;
+        }
+        .detected-issues-content {
+            background: #fff;
+            padding: 12px 15px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 0.95em;
+            color: #2d3748;
+            line-height: 1.6;
+            max-height: 220px;
+            overflow-y: auto;
+            transition: background 0.2s ease;
+        }
+        .detected-issues-textarea {
+            width: 100%;
+            min-height: 90px;
+            padding: 10px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 0.95em;
+            resize: vertical;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+        .detected-issues-textarea:focus {
+            outline: none;
+            border-color: #4e73df;
+            box-shadow: 0 0 0 3px rgba(78, 115, 223, 0.12);
+        }
+        .detected-issues-content:hover {
+            background: #fdfdfe;
         }
         .view-return-btn:hover {
             background: #e8f5e9;
@@ -896,6 +931,7 @@ if (!$all_transactions) {
             'itemSize' => $row['item_size'] ?? null,
             'equipmentName' => $row['equipment_name'] ?? null,
             'status' => $row['status'] ?? null,
+            'detectedIssues' => $row['detected_issues'] ?? null,
             'borrowPhotos' => $borrowPhotos,
                                     'returnPhotos' => $returnPhotos,
                                     'detections' => $damageDetections,
@@ -1065,12 +1101,12 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                         <div class="return-review-placeholder" data-review-placeholder="return">No photo available</div>
                     </div>
                 </div>
-                <!-- Removed duplicate detected issues section -->
             </div>
             <div class="return-review-actions">
                 <div class="detected-issues-section">
                     <h4>Detected Issues</h4>
-                    <div id="detectedIssues" class="detected-issues-content">No issues detected</div>
+                    <textarea id="detectedIssuesInput" class="detected-issues-textarea" placeholder="Describe any damages or issues detected during review..."></textarea>
+                    <div id="detectedIssuesDisplay" class="detected-issues-content">No issues detected</div>
                 </div>
                 <div class="return-review-buttons">
                     <button type="button" class="approval-btn approve-btn" data-review-action="verify">Mark Verified</button>
@@ -1109,7 +1145,8 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         const returnReviewStatusText = document.querySelector('[data-review-reviewstatus]');
         const returnReviewNotesContainer = document.querySelector('[data-review-notes-container]');
         const returnReviewNotes = document.getElementById('returnReviewNotes');
-        const detectedIssues = document.getElementById('detectedIssues');
+        const detectedIssuesInput = document.getElementById('detectedIssuesInput');
+        const detectedIssuesDisplay = document.getElementById('detectedIssuesDisplay');
         const returnReviewError = document.querySelector('[data-review-error]');
         const returnReviewPhotos = {
             reference: document.querySelector('[data-review-photo="reference"]'),
@@ -1167,76 +1204,114 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             }
         }
 
-        function resetReturnReviewNotes() {
-            if (returnReviewNotes) {
-                returnReviewNotes.value = '';
+        function getActiveSimilarity() {
+            if (!activeReturnReview || activeReturnReview.similarityScore === undefined || activeReturnReview.similarityScore === null) {
+                return null;
             }
-            if (detectedIssues) {
-                const issuesSection = detectedIssues.closest('.detected-issues-section');
-                // Reset all severity classes
-                issuesSection.className = 'detected-issues-section';
-                
-                // Set default detected issues based on similarity score
-                const similarity = activeReturnReview?.similarityScore ?? 100;
-                let issuesText = 'No issues detected';
-                let severityClass = 'severity-none';
-                
-                if (activeReturnReview?.detectedIssues) {
-                    // Use the detected issues from the backend if available
-                    issuesText = activeReturnReview.detectedIssues;
-                    // If we have detected issues, use similarity to determine severity
-                    if (similarity >= 95) {
-                        severityClass = 'severity-none';
-                    } else if (similarity >= 85) {
-                        severityClass = 'severity-low';
-                    } else if (similarity >= 70) {
-                        severityClass = 'severity-medium';
-                    } else {
+            const numeric = parseFloat(activeReturnReview.similarityScore);
+            return Number.isFinite(numeric) ? numeric : null;
+        }
+
+        function determineDetectedIssuesText() {
+            let issuesText = (activeReturnReview?.detectedIssues || '').trim();
+            const similarity = getActiveSimilarity();
+            const itemSize = (activeReturnReview?.itemSize || '').toLowerCase();
+
+            if (!issuesText && similarity !== null && similarity < 70 && itemSize === 'small') {
+                issuesText = 'Possible scratches or damage detected.';
+            }
+
+            return issuesText;
+        }
+
+        function applyDetectedIssuesUI(rawText) {
+            const text = (rawText || '').trim();
+            if (detectedIssuesInput) {
+                detectedIssuesInput.value = rawText || '';
+            }
+            if (!detectedIssuesDisplay) {
+                return;
+            }
+
+            const issuesSection = detectedIssuesDisplay.closest('.detected-issues-section');
+            const severityClasses = ['severity-none', 'severity-low', 'severity-medium', 'severity-high'];
+            if (issuesSection) {
+                issuesSection.classList.remove(...severityClasses);
+            }
+
+            const similarity = getActiveSimilarity();
+            const hasText = text.length > 0;
+            let severityClass = 'severity-none';
+
+            if (hasText) {
+                if (similarity !== null) {
+                    if (similarity < 70) {
                         severityClass = 'severity-high';
+                    } else if (similarity < 85) {
+                        severityClass = 'severity-medium';
+                    } else if (similarity < 95) {
+                        severityClass = 'severity-low';
+                    } else {
+                        severityClass = 'severity-low';
                     }
                 } else {
-                    // Fallback to similarity-based detection
-                    if (similarity >= 95) {
-                        issuesText = 'No visible damage detected';
-                        severityClass = 'severity-none';
-                    } else if (similarity >= 85) {
-                        issuesText = 'Minor wear and tear detected';
-                        severityClass = 'severity-low';
-                    } else if (similarity >= 70) {
-                        issuesText = 'Noticeable damage or differences detected';
-                        severityClass = 'severity-medium';
-                    } else {
-                        issuesText = 'Significant damage or differences detected';
-                        severityClass = 'severity-high';
-                    }
+                    severityClass = 'severity-medium';
                 }
-                
-                // Apply severity class and set content
+            }
+
+            if (issuesSection) {
                 issuesSection.classList.add(severityClass);
-                detectedIssues.textContent = issuesText;
-                
-                // Add icon based on severity
+
                 const iconMap = {
                     'severity-high': 'exclamation-triangle',
                     'severity-medium': 'exclamation-circle',
                     'severity-low': 'info-circle',
                     'severity-none': 'check-circle'
                 };
-                
-                // Update the icon if it exists, or create it
+
                 let icon = issuesSection.querySelector('.severity-icon');
                 if (!icon) {
                     icon = document.createElement('i');
                     icon.className = 'fas severity-icon';
-                    issuesSection.querySelector('h4').prepend(icon);
+                    const heading = issuesSection.querySelector('h4');
+                    if (heading) {
+                        heading.prepend(icon);
+                    }
                 }
-                icon.className = `fas fa-${iconMap[severityClass]} severity-icon`;
+                if (icon) {
+                    icon.className = `fas fa-${iconMap[severityClass] || 'check-circle'} severity-icon`;
+                }
             }
-            
+
+            detectedIssuesDisplay.textContent = hasText ? text : 'No issues detected';
+            detectedIssuesDisplay.style.display = 'block';
+        }
+
+        function syncDetectedIssues(text) {
+            applyDetectedIssuesUI(text);
+            if (activeReturnReview) {
+                activeReturnReview.detectedIssues = text;
+            }
+        }
+
+        function resetReturnReviewNotes() {
+            if (returnReviewNotes) {
+                returnReviewNotes.value = '';
+            }
+
+            const issuesText = determineDetectedIssuesText();
+            syncDetectedIssues(issuesText);
+
             if (returnReviewError) {
                 returnReviewError.textContent = '';
                 returnReviewError.style.display = 'none';
             }
+        }
+
+        if (detectedIssuesInput) {
+            detectedIssuesInput.addEventListener('input', () => {
+                syncDetectedIssues(detectedIssuesInput.value || '');
+            });
         }
 
         function populateReturnReview(info) {
@@ -1498,8 +1573,11 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             payload.append('transaction_id', activeReturnReview.transactionId);
             payload.append('action', action);
             
-            // Detected issues are now read-only and handled by the system
-            // No need to include them in the form submission
+            // Include detected issues from the textarea
+            if (detectedIssuesInput) {
+                const detectedIssuesText = (detectedIssuesInput.value || '').trim();
+                payload.append('detected_issues', detectedIssuesText);
+            }
             
             // Add notes for flag/reject actions
             if (['flag', 'reject'].includes(action) && returnReviewNotes) {
@@ -1597,6 +1675,12 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
 
             existingInfo.verificationStatus = verificationStatus;
             existingInfo.reviewStatus = reviewStatus;
+            const detectedIssuesUpdated = transaction.detected_issues ?? display.detected_issues ?? existingInfo.detectedIssues;
+            if (detectedIssuesUpdated && detectedIssuesUpdated !== '') {
+                existingInfo.detectedIssues = detectedIssuesUpdated;
+            } else {
+                delete existingInfo.detectedIssues;
+            }
             if (similarityScore !== null && similarityScore !== undefined) {
                 existingInfo.similarityScore = Number(similarityScore);
             } else {
