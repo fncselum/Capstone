@@ -495,7 +495,9 @@ if (!$all_transactions) {
             background: #f57c00;
         }
         .return-review-modal {
-            max-width: 820px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
         }
         .return-review-header {
             display: flex;
@@ -528,30 +530,30 @@ if (!$all_transactions) {
         }
         .return-review-gallery {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
         }
         .return-review-photo {
             background: #f8f9fa;
-            border-radius: 10px;
-            padding: 10px;
+            border-radius: 8px;
+            padding: 8px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
         .return-review-photo span {
-            font-size: 0.85em;
+            font-size: 0.8em;
             font-weight: 600;
             color: #424242;
         }
         .return-review-photo-frame {
             position: relative;
             width: 100%;
-            padding-top: 66%;
+            padding-top: 60%;
             background: #fff;
             border: 1px solid #e0e0e0;
-            border-radius: 8px;
+            border-radius: 6px;
             overflow: hidden;
         }
         .return-review-photo-frame img {
@@ -912,13 +914,12 @@ if (!$all_transactions) {
         $verificationStatusForInfo = $verificationStatus;
         $reviewStatusForInfo = $reviewStatus;
 
-        if (!$showReturnReviewButton && $verificationStatus !== 'Not Yet Returned') {
+        // Only show "Not Yet Returned" for items that are actually not returned
+        if (!$showReturnReviewButton) {
             $verificationBadgeClass = 'not-returned';
             $displayVerificationText = 'Not Yet Returned';
             $verificationStatusForInfo = 'Not Yet Returned';
-            if ($reviewStatus !== 'Not Yet Returned') {
-                $reviewStatusForInfo = 'Not Yet Returned';
-            }
+            $reviewStatusForInfo = 'Not Yet Returned';
         }
 
         $canOpenReturnReview = !empty($returnPhotos) || !empty($damageDetections) || !empty($referencePhotos) || !empty($borrowPhotos);
@@ -1105,7 +1106,6 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             <div class="return-review-actions">
                 <div class="detected-issues-section">
                     <h4>Detected Issues</h4>
-                    <textarea id="detectedIssuesInput" class="detected-issues-textarea" placeholder="Describe any damages or issues detected during review..."></textarea>
                     <div id="detectedIssuesDisplay" class="detected-issues-content">No issues detected</div>
                 </div>
                 <div class="return-review-buttons">
@@ -1145,7 +1145,6 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         const returnReviewStatusText = document.querySelector('[data-review-reviewstatus]');
         const returnReviewNotesContainer = document.querySelector('[data-review-notes-container]');
         const returnReviewNotes = document.getElementById('returnReviewNotes');
-        const detectedIssuesInput = document.getElementById('detectedIssuesInput');
         const detectedIssuesDisplay = document.getElementById('detectedIssuesDisplay');
         const returnReviewError = document.querySelector('[data-review-error]');
         const returnReviewPhotos = {
@@ -1226,9 +1225,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
 
         function applyDetectedIssuesUI(rawText) {
             const text = (rawText || '').trim();
-            if (detectedIssuesInput) {
-                detectedIssuesInput.value = rawText || '';
-            }
+            // System auto-detected issues - read-only display only
             if (!detectedIssuesDisplay) {
                 return;
             }
@@ -1308,11 +1305,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             }
         }
 
-        if (detectedIssuesInput) {
-            detectedIssuesInput.addEventListener('input', () => {
-                syncDetectedIssues(detectedIssuesInput.value || '');
-            });
-        }
+        // System auto-detects issues - no manual input needed
 
         function populateReturnReview(info) {
             if (!info) {
@@ -1334,14 +1327,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 }
             }
             if (returnReviewStatusText) {
-                const reviewStatusDisplay = info.reviewStatus && info.reviewStatus !== 'Pending' ? 'Review status: ' + info.reviewStatus : '';
-                if (reviewStatusDisplay) {
-                    returnReviewStatusText.textContent = reviewStatusDisplay;
-                    returnReviewStatusText.style.display = 'inline-block';
-                } else {
-                    returnReviewStatusText.textContent = '';
-                    returnReviewStatusText.style.display = 'none';
-                }
+                // Remove review status display as requested
+                returnReviewStatusText.textContent = '';
+                returnReviewStatusText.style.display = 'none';
             }
             setReturnReviewPhoto('reference', info.referencePhotos || []);
             setReturnReviewPhoto('return', info.returnPhotos || []);
@@ -1573,11 +1561,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             payload.append('transaction_id', activeReturnReview.transactionId);
             payload.append('action', action);
             
-            // Include detected issues from the textarea
-            if (detectedIssuesInput) {
-                const detectedIssuesText = (detectedIssuesInput.value || '').trim();
-                payload.append('detected_issues', detectedIssuesText);
-            }
+            // System auto-detects issues - no manual input needed
             
             // Add notes for flag/reject actions
             if (['flag', 'reject'].includes(action) && returnReviewNotes) {

@@ -13,6 +13,146 @@ if (!function_exists('calculateSSIM')) {
         if (!is_resource($img1) || !is_resource($img2)) {
             return 0;
         }
+
+if (!function_exists('loadImageResource')) {
+    /**
+     * Load an image from disk and return a GD resource.
+     */
+    function loadImageResource(string $path)
+    {
+        if (!is_readable($path)) {
+            return null;
+        }
+
+        $info = @getimagesize($path);
+        if ($info === false) {
+            return null;
+        }
+
+        try {
+            switch ($info[2]) {
+                case IMAGETYPE_JPEG:
+                    return @imagecreatefromjpeg($path);
+                case IMAGETYPE_PNG:
+                    $img = @imagecreatefrompng($path);
+                    if ($img) {
+                        imagealphablending($img, false);
+                        imagesavealpha($img, true);
+                    }
+                    return $img;
+                case IMAGETYPE_GIF:
+                    return @imagecreatefromgif($path);
+                default:
+                    return null;
+            }
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+}
+
+if (!function_exists('compareImagesPixelSimilarity')) {
+    /**
+     * Perform a lightweight pixel comparison returning similarity in the 0..1 range.
+     */
+    function compareImagesPixelSimilarity(string $referencePath, string $returnPath, int $step = 5, int $threshold = 30): ?float
+    {
+        if (!extension_loaded('gd')) {
+            return null;
+        }
+
+        $ref = loadImageResource($referencePath);
+        $ret = loadImageResource($returnPath);
+
+        if (!$ref || !$ret) {
+            if ($ref) {
+                imagedestroy($ref);
+            }
+            if ($ret) {
+                imagedestroy($ret);
+            }
+            return null;
+        }
+
+        $refWidth = imagesx($ref);
+        $refHeight = imagesy($ref);
+        $retWidth = imagesx($ret);
+        $retHeight = imagesy($ret);
+
+        if ($refWidth === 0 || $refHeight === 0 || $retWidth === 0 || $retHeight === 0) {
+            imagedestroy($ref);
+            imagedestroy($ret);
+            return null;
+        }
+
+        $targetWidth = min($refWidth, $retWidth, 300);
+        $targetHeight = min($refHeight, $retHeight, 300);
+
+        $refResized = imagecreatetruecolor($targetWidth, $targetHeight);
+        $retResized = imagecreatetruecolor($targetWidth, $targetHeight);
+
+        imagecopyresampled($refResized, $ref, 0, 0, 0, 0, $targetWidth, $targetHeight, $refWidth, $refHeight);
+        imagecopyresampled($retResized, $ret, 0, 0, 0, 0, $targetWidth, $targetHeight, $retWidth, $retHeight);
+
+        $total = 0;
+        $diff = 0;
+
+        for ($x = 0; $x < $targetWidth; $x += $step) {
+            for ($y = 0; $y < $targetHeight; $y += $step) {
+                $rgb1 = imagecolorat($refResized, $x, $y);
+                $rgb2 = imagecolorat($retResized, $x, $y);
+
+                $r1 = ($rgb1 >> 16) & 0xFF;
+                $g1 = ($rgb1 >> 8) & 0xFF;
+                $b1 = $rgb1 & 0xFF;
+
+                $r2 = ($rgb2 >> 16) & 0xFF;
+                $g2 = ($rgb2 >> 8) & 0xFF;
+                $b2 = $rgb2 & 0xFF;
+
+                $pixelDiff = abs($r1 - $r2) + abs($g1 - $g2) + abs($b1 - $b2);
+                if ($pixelDiff > $threshold) {
+                    $diff++;
+                }
+                $total++;
+            }
+        }
+
+        imagedestroy($ref);
+        imagedestroy($ret);
+        imagedestroy($refResized);
+        imagedestroy($retResized);
+
+        if ($total === 0) {
+            return null;
+        }
+
+        $similarity = 1 - ($diff / $total);
+        return max(0, min(1, $similarity));
+    }
+}
+
+if (!function_exists('determineDetectedIssuesFromSimilarity')) {
+    /**
+     * Map similarity score (0..1) to a detected issues string and severity key.
+     */
+    function determineDetectedIssuesFromSimilarity(?float $similarity): array
+    {
+        if ($similarity === null) {
+            return ['detected_issues' => 'Image comparison unavailable', 'severity' => 'unknown'];
+        }
+
+        if ($similarity > 0.90) {
+            return ['detected_issues' => 'No issues detected', 'severity' => 'none'];
+        }
+
+        if ($similarity >= 0.70) {
+            return ['detected_issues' => 'Minor scratches or dirt detected', 'severity' => 'minor'];
+        }
+
+        return ['detected_issues' => 'Major damage detected', 'severity' => 'major'];
+    }
+}
         
         $width = imagesx($img1);
         $height = imagesy($img1);
@@ -97,7 +237,7 @@ if (!function_exists('calculateSSIM')) {
     }
 }
 
-if (!function_exists('compareImagesSimilarity')) {
+if (!function_exists('loadImageResource')) {
     /**
      * Compare two images and return a similarity score between 0 and 1
      * 1 means identical, 0 means completely different

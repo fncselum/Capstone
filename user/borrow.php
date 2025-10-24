@@ -95,17 +95,18 @@ if ($db_connected) {
 							$requiresApproval = (strtolower($item_size) === 'large');
 							$borrow_status = $requiresApproval ? 'Pending Approval' : 'Active';
 							$approval_status = $requiresApproval ? 'Pending' : 'Approved';
-							$approved_by = null;
+							$approved_by = $requiresApproval ? null : 1; // Set to admin ID 1 for auto-approved items
 							$approved_at = $requiresApproval ? null : date('Y-m-d H:i:s');
 							$rejection_reason = null;
 							$return_review_status = 'Pending';
+							$processed_by = $requiresApproval ? null : 1; // Set to admin ID 1 for auto-approved items
 							
 							$trans_stmt = $conn->prepare("INSERT INTO transactions 
 								(user_id, equipment_id, transaction_type, quantity, transaction_date, 
-								expected_return_date, condition_before, status, penalty_applied, notes, item_size, approval_status, approved_by, approved_at, rejection_reason, return_review_status, created_at, updated_at) 
-								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
+								expected_return_date, condition_before, status, penalty_applied, notes, item_size, approval_status, approved_by, approved_at, rejection_reason, return_review_status, processed_by, created_at, updated_at) 
+								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
 							
-							$trans_stmt->bind_param("ississsisssisss", 
+							$trans_stmt->bind_param("ississsisssissss", 
 								$user_id, 
 								$rfid_code, 
 								$transaction_type, 
@@ -120,7 +121,8 @@ if ($db_connected) {
 								$approved_by,
 								$approved_at,
 								$rejection_reason,
-								$return_review_status
+								$return_review_status,
+								$processed_by
 							);
 							
 							if ($trans_stmt->execute()) {
