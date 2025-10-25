@@ -1,774 +1,1042 @@
 <?php
-// Enable error reporting for debugging
-// error_reporting(E_ALL);
-// ini_set('display_errors', 1);
+/**
+ * Image Comparison System - Hybrid SSIM + Perceptual Hash
+ * Optimized for equipment return verification
+ */
 
-if (!function_exists('calculateSSIM')) {
+if (!function_exists('compareReturnToReference')) {
     /**
-     * Calculate Structural Similarity Index (SSIM) between two images
-     * Returns a value between -1 and 1, where 1 means identical
-     * Uses a window-based approach for better accuracy
+     * Main comparison function - compares return photo to reference
+     * 
+     * @param string $referencePath Path to reference image (borrow photo or equipment image)
+     * @param string $returnPath Path to return photo
+     * @param array $options Configuration options
+     * @return array Comparison results with similarity score and detected issues
      */
-    function calculateSSIM($img1, $img2, $windowSize = 8, $stride = 4) {
-        if (!is_resource($img1) || !is_resource($img2)) {
-            return 0;
-        }
+    function compareReturnToReference(string $referencePath, string $returnPath, array $options = []): array {
+        $defaults = [
+            'resize' => 300,
+            'hash_size' => 16,
+            'weights' => ['ssim' => 0.50, 'phash' => 0.30, 'hist' => 0.05, 'edge' => 0.05, 'gradient' => 0.10],
+            'item_size' => 'medium',
+            'enable_preview' => true,
+        ];
+        $config = array_merge($defaults, $options);
+        $warnings = [];
 
-if (!function_exists('loadImageResource')) {
-    /**
-     * Load an image from disk and return a GD resource.
-     */
-    function loadImageResource(string $path)
-    {
-        if (!is_readable($path)) {
-            return null;
-        }
-
-        $info = @getimagesize($path);
-        if ($info === false) {
-            return null;
-        }
-
-        try {
-            switch ($info[2]) {
-                case IMAGETYPE_JPEG:
-                    return @imagecreatefromjpeg($path);
-                case IMAGETYPE_PNG:
-                    $img = @imagecreatefrompng($path);
-                    if ($img) {
-                        imagealphablending($img, false);
-                        imagesavealpha($img, true);
-                    }
-                    return $img;
-                case IMAGETYPE_GIF:
-                    return @imagecreatefromgif($path);
-                default:
-                    return null;
-            }
-        } catch (Throwable $e) {
-            return null;
-        }
-    }
-}
-
-if (!function_exists('compareImagesPixelSimilarity')) {
-    /**
-     * Perform a lightweight pixel comparison returning similarity in the 0..1 range.
-     */
-    function compareImagesPixelSimilarity(string $referencePath, string $returnPath, int $step = 5, int $threshold = 30): ?float
-    {
+        // Check GD extension
         if (!extension_loaded('gd')) {
-            return null;
+            return [
+                'success' => false,
+                'similarity' => 0,
+                'detected_issues_text' => 'Image processing unavailable (GD extension missing)',
+                'severity_level' => 'high',
+                'warnings' => ['GD extension not available'],
+            ];
         }
 
-        $ref = loadImageResource($referencePath);
-        $ret = loadImageResource($returnPath);
-
-        if (!$ref || !$ret) {
-            if ($ref) {
-                imagedestroy($ref);
-            }
-            if ($ret) {
-                imagedestroy($ret);
-            }
-            return null;
+        // Check file readability
+        if (!is_readable($referencePath)) {
+            $warnings[] = 'Reference image not readable: ' . basename($referencePath);
         }
-
-        $refWidth = imagesx($ref);
-        $refHeight = imagesy($ref);
-        $retWidth = imagesx($ret);
-        $retHeight = imagesy($ret);
-
-        if ($refWidth === 0 || $refHeight === 0 || $retWidth === 0 || $retHeight === 0) {
-            imagedestroy($ref);
-            imagedestroy($ret);
-            return null;
+        if (!is_readable($returnPath)) {
+            $warnings[] = 'Return image not readable: ' . basename($returnPath);
         }
-
-        $targetWidth = min($refWidth, $retWidth, 300);
-        $targetHeight = min($refHeight, $retHeight, 300);
-
-        $refResized = imagecreatetruecolor($targetWidth, $targetHeight);
-        $retResized = imagecreatetruecolor($targetWidth, $targetHeight);
-
-        imagecopyresampled($refResized, $ref, 0, 0, 0, 0, $targetWidth, $targetHeight, $refWidth, $refHeight);
-        imagecopyresampled($retResized, $ret, 0, 0, 0, 0, $targetWidth, $targetHeight, $retWidth, $retHeight);
-
-        $total = 0;
-        $diff = 0;
-
-        for ($x = 0; $x < $targetWidth; $x += $step) {
-            for ($y = 0; $y < $targetHeight; $y += $step) {
-                $rgb1 = imagecolorat($refResized, $x, $y);
-                $rgb2 = imagecolorat($retResized, $x, $y);
-
-                $r1 = ($rgb1 >> 16) & 0xFF;
-                $g1 = ($rgb1 >> 8) & 0xFF;
-                $b1 = $rgb1 & 0xFF;
-
-                $r2 = ($rgb2 >> 16) & 0xFF;
-                $g2 = ($rgb2 >> 8) & 0xFF;
-                $b2 = $rgb2 & 0xFF;
-
-                $pixelDiff = abs($r1 - $r2) + abs($g1 - $g2) + abs($b1 - $b2);
-                if ($pixelDiff > $threshold) {
-                    $diff++;
-                }
-                $total++;
-            }
-        }
-
-        imagedestroy($ref);
-        imagedestroy($ret);
-        imagedestroy($refResized);
-        imagedestroy($retResized);
-
-        if ($total === 0) {
-            return null;
-        }
-
-        $similarity = 1 - ($diff / $total);
-        return max(0, min(1, $similarity));
-    }
-}
-
-if (!function_exists('determineDetectedIssuesFromSimilarity')) {
-    /**
-     * Map similarity score (0..1) to a detected issues string and severity key.
-     */
-    function determineDetectedIssuesFromSimilarity(?float $similarity): array
-    {
-        if ($similarity === null) {
-            return ['detected_issues' => 'Image comparison unavailable', 'severity' => 'unknown'];
-        }
-
-        if ($similarity > 0.90) {
-            return ['detected_issues' => 'No issues detected', 'severity' => 'none'];
-        }
-
-        if ($similarity >= 0.70) {
-            return ['detected_issues' => 'Minor scratches or dirt detected', 'severity' => 'minor'];
-        }
-
-        return ['detected_issues' => 'Major damage detected', 'severity' => 'major'];
-    }
-}
         
+        if (count($warnings) > 0) {
+            return [
+                'success' => false,
+                'similarity' => 0,
+                'detected_issues_text' => 'Could not read one or both images',
+                'severity_level' => 'high',
+                'warnings' => $warnings,
+            ];
+        }
+
+        // Normalize images for comparison
+        [$referenceImage, $refWarning] = normalizeImageForComparison($referencePath, (int)$config['resize']);
+        [$returnImage, $retWarning] = normalizeImageForComparison($returnPath, (int)$config['resize']);
+        [$referenceColorImage, $refColorWarning] = loadColorNormalizedImage($referencePath, (int)$config['resize']);
+        [$returnColorImage, $retColorWarning] = loadColorNormalizedImage($returnPath, (int)$config['resize']);
+
+        if ($refWarning) $warnings[] = $refWarning;
+        if ($retWarning) $warnings[] = $retWarning;
+        if ($refColorWarning) $warnings[] = $refColorWarning;
+        if ($retColorWarning) $warnings[] = $retColorWarning;
+
+        if (!$referenceImage || !$returnImage) {
+            if ($referenceImage) imagedestroy($referenceImage);
+            if ($returnImage) imagedestroy($returnImage);
+            if ($referenceColorImage) imagedestroy($referenceColorImage);
+            if ($returnColorImage) imagedestroy($returnColorImage);
+            
+            return [
+                'success' => false,
+                'similarity' => 0,
+                'detected_issues_text' => 'Failed to process images for comparison',
+                'severity_level' => 'high',
+                'warnings' => $warnings,
+            ];
+        }
+
+        // Align brightness/contrast before scoring
+        $referenceStats = calculateLuminanceStats($referenceImage);
+        $returnStats = calculateLuminanceStats($returnImage);
+
+        $targetMean = ($referenceStats['mean'] + $returnStats['mean']) / 2;
+        $targetStd = max(25.0, min(90.0, ($referenceStats['stddev'] + $returnStats['stddev']) / 2));
+
+        adjustImageLuminance($referenceImage, $targetMean, $targetStd, $referenceStats);
+        adjustImageLuminance($returnImage, $targetMean, $targetStd, $returnStats);
+
+        // Calculate similarity scores
+        $ssimScore = computeSSIMScore($referenceImage, $returnImage) * 100;
+        $phashScore = computePerceptualHashSimilarity($referenceImage, $returnImage, (int)$config['hash_size']) * 100;
+        $pixelScore = computePixelDifferenceScore($referenceImage, $returnImage) * 100;
+        
+        // Additional metrics for better detection
+        if ($referenceColorImage && $returnColorImage) {
+            $histScore = computeHistogramSimilarity($referenceColorImage, $returnColorImage) * 100;
+            $histScore = sqrt(max(0.0, min(1.0, $histScore / 100))) * 100;
+        } else {
+            $histScore = 0.0;
+        }
+        $edgeDiffPct = computeEdgeDifference($referenceImage, $returnImage);
+        $gradientSimilarity = computeGradientOrientationSimilarity($referenceImage, $returnImage) * 100;
+
+        // Detect potential object absence or major structural mismatch
+        $objectPresenceScore = computeObjectPresenceScore($referenceImage, $returnImage) * 100;
+
+        // Weighted combination with all metrics
+        $weights = $config['weights'];
+        $ssimWeight = $weights['ssim'] ?? 0.50;
+        $phashWeight = $weights['phash'] ?? 0.30;
+        $histWeight = $weights['hist'] ?? 0.10;
+        $edgeWeightConfigured = $weights['edge'] ?? 0.10;
+        $gradientWeight = $weights['gradient'] ?? 0.0;
+
+        $gradientFactor = min(1.0, max(0.0, $gradientSimilarity / 100.0));
+        $edgeAttenuation = 0.5 + 0.5 * (1.0 - $gradientFactor);
+        $edgeWeight = $edgeWeightConfigured * $edgeAttenuation;
+
+        $weightSum = max(0.01, $ssimWeight + $phashWeight + $histWeight + $edgeWeight + $gradientWeight);
+
+        $combined = (
+            $ssimWeight * $ssimScore +
+            $phashWeight * $phashScore +
+            $histWeight * $histScore +
+            $edgeWeight * (100 - ($edgeDiffPct * 100)) +
+            $gradientWeight * $gradientSimilarity
+        ) / $weightSum;
+        $combined = max(0, min(100, $combined));
+
+        // Apply hard penalty if object appears missing or completely different
+        if ($objectPresenceScore < 40.0 && $edgeDiffPct > 0.25) {
+            $combined = min($combined, 35.0);
+        }
+
+        // Determine confidence band and detected issues
+        $confidenceBand = 'low';
+        $severityLevel = 'high';
+        $baseMessage = 'Item mismatch detected – please check return.';
+        $detailMessages = [];
+        
+        if ($combined >= 70) {
+            $confidenceBand = 'high';
+            $severityLevel = 'none';
+            $baseMessage = 'Item returned successfully – no damages detected.';
+        } elseif ($combined >= 50) {
+            $confidenceBand = 'medium';
+            $severityLevel = 'medium';
+            $baseMessage = 'Minor visual difference detected – verify manually.';
+        }
+
+        // Additional detail cues
+        if ($combined < 50) {
+            if ($objectPresenceScore < 40.0) {
+                $detailMessages[] = 'Object structure not recognized';
+            }
+            if ($edgeDiffPct > 0.18 && $gradientSimilarity < 70) {
+                $detailMessages[] = 'Significant shape difference detected';
+            }
+            if ($histScore < 55) {
+                $detailMessages[] = 'Major color or brightness inconsistency';
+            }
+            if ($ssimScore < 45) {
+                $detailMessages[] = 'Low structural similarity';
+            }
+        } elseif ($combined < 70) {
+            if ($edgeDiffPct > 0.12 && $gradientSimilarity < 80) {
+                $detailMessages[] = 'Shape difference observed';
+            }
+            if ($histScore < 75) {
+                $detailMessages[] = 'Color/lighting variation detected';
+            }
+            if ($ssimScore < 70 && $phashScore > 60) {
+                $detailMessages[] = 'Surface texture variation detected';
+            }
+        }
+
+        $detectedIssuesList = array_merge([$baseMessage], $detailMessages);
+        $detectedIssuesText = implode("\n", array_map(static function ($message) {
+            $trimmed = trim($message);
+            if ($trimmed === '') {
+                return $trimmed;
+            }
+            // Ensure consistent capitalization and trailing period
+            $normalized = ucfirst($trimmed);
+            if (substr($normalized, -1) !== '.') {
+                $normalized .= '.';
+            }
+            return $normalized;
+        }, $detectedIssuesList));
+        $detectedIssuesText = trim($detectedIssuesText);
+
+        // Clean up GD resources
+        imagedestroy($referenceImage);
+        imagedestroy($returnImage);
+        if ($referenceColorImage) imagedestroy($referenceColorImage);
+        if ($returnColorImage) imagedestroy($returnColorImage);
+
+        $roundedSimilarity = round($combined, 2);
+        $roundedSSIM = round($ssimScore, 2);
+        $roundedPhash = round($phashScore, 2);
+        $roundedPixel = round($pixelScore, 2);
+        $roundedHist = round($histScore, 2);
+        $roundedEdge = round($edgeDiffPct * 100, 2);
+        $roundedGradient = round($gradientSimilarity, 2);
+
+        return [
+            'success' => true,
+            'similarity' => $roundedSimilarity,
+            'ssim_score' => $roundedSSIM,
+            'phash_score' => $roundedPhash,
+            'pixel_score' => $roundedPixel,
+            'pixel_difference_score' => $roundedPixel, // backward compatibility
+            'hist_score' => $roundedHist,
+            'histogram_score' => $roundedHist,
+            'edge_diff_pct' => $roundedEdge,
+            'edge_difference_pct' => $roundedEdge,
+            'gradient_score' => $roundedGradient,
+            'object_presence_score' => round($objectPresenceScore, 2),
+            'confidence_band' => $confidenceBand,
+            'detected_issues_text' => $detectedIssuesText,
+            'detected_issues_list' => $detectedIssuesList,
+            'severity_level' => $severityLevel,
+            'method_used' => 'hybrid',
+            'warnings' => $warnings,
+            'raw_scores' => [
+                'weights' => $weights,
+                'effective_edge_weight' => $edgeWeight,
+                'edge_attenuation' => $edgeAttenuation,
+                'weight_sum' => $weightSum,
+                'ssim' => $ssimScore,
+                'phash' => $phashScore,
+                'histogram' => $histScore,
+                'edge_difference' => $edgeDiffPct,
+                'gradient' => $gradientSimilarity,
+                'object_presence' => $objectPresenceScore,
+                'pixel_similarity' => $pixelScore,
+            ],
+            'metadata' => [
+                'reference_path' => basename($referencePath),
+                'return_path' => basename($returnPath),
+                'item_size' => $config['item_size'],
+                'timestamp' => date('Y-m-d H:i:s'),
+                'version' => '2.0',
+            ],
+        ];
+    }
+
+    /**
+     * Normalize image for comparison (resize + grayscale)
+     */
+    function normalizeImageForComparison(string $path, int $size = 256): array {
+        $warning = null;
+        $contents = @file_get_contents($path);
+        
+        if ($contents === false) {
+            return [null, 'Failed to read: ' . basename($path)];
+        }
+
+        $source = @imagecreatefromstring($contents);
+        if (!$source) {
+            return [null, 'Invalid image: ' . basename($path)];
+        }
+
+        $width = max(1, imagesx($source));
+        $height = max(1, imagesy($source));
+
+        $canvas = imagecreatetruecolor($size, $size);
+        if (!$canvas) {
+            imagedestroy($source);
+            return [null, 'Failed to create canvas'];
+        }
+
+        imagealphablending($canvas, false);
+        imagesavealpha($canvas, true);
+
+        if (!imagecopyresampled($canvas, $source, 0, 0, 0, 0, $size, $size, $width, $height)) {
+            $warning = 'Resample failed: ' . basename($path);
+        }
+
+        if (!imagefilter($canvas, IMG_FILTER_GRAYSCALE)) {
+            $warning = 'Grayscale conversion failed: ' . basename($path);
+        }
+
+        imagedestroy($source);
+        return [$canvas, $warning];
+    }
+
+    /**
+     * Load color image with adaptive normalization for histogram analysis
+     */
+    function loadColorNormalizedImage(string $path, int $size = 256): array {
+        $warning = null;
+        $contents = @file_get_contents($path);
+
+        if ($contents === false) {
+            return [null, 'Failed to read: ' . basename($path)];
+        }
+
+        $source = @imagecreatefromstring($contents);
+        if (!$source) {
+            return [null, 'Invalid image: ' . basename($path)];
+        }
+
+        $width = max(1, imagesx($source));
+        $height = max(1, imagesy($source));
+
+        $canvas = imagecreatetruecolor($size, $size);
+        if (!$canvas) {
+            imagedestroy($source);
+            return [null, 'Failed to create canvas'];
+        }
+
+        imagealphablending($canvas, true);
+        imagesavealpha($canvas, false);
+
+        if (!imagecopyresampled($canvas, $source, 0, 0, 0, 0, $size, $size, $width, $height)) {
+            $warning = 'Resample failed: ' . basename($path);
+        }
+
+        applyAdaptiveEqualization($canvas, 32, 2.0);
+
+        imagedestroy($source);
+        return [$canvas, $warning];
+    }
+
+    /**
+     * Apply simple CLAHE-style adaptive equalization for color images
+     */
+    function applyAdaptiveEqualization($img, int $tileSize = 32, float $clipLimit = 2.0): void {
+        $width = imagesx($img);
+        $height = imagesy($img);
+
+        $tileSize = max(8, min(128, $tileSize));
+        $tilesX = (int)ceil($width / $tileSize);
+        $tilesY = (int)ceil($height / $tileSize);
+        $clipLimit = max(0.5, min(8.0, $clipLimit));
+
+        for ($ty = 0; $ty < $tilesY; $ty++) {
+            $yStart = $ty * $tileSize;
+            $yEnd = min($height, $yStart + $tileSize);
+
+            for ($tx = 0; $tx < $tilesX; $tx++) {
+                $xStart = $tx * $tileSize;
+                $xEnd = min($width, $xStart + $tileSize);
+
+                $histR = array_fill(0, 256, 0);
+                $histG = array_fill(0, 256, 0);
+                $histB = array_fill(0, 256, 0);
+                $pixelCount = 0;
+
+                for ($y = $yStart; $y < $yEnd; $y++) {
+                    for ($x = $xStart; $x < $xEnd; $x++) {
+                        $color = imagecolorat($img, $x, $y);
+                        $r = ($color >> 16) & 0xFF;
+                        $g = ($color >> 8) & 0xFF;
+                        $b = $color & 0xFF;
+
+                        $histR[$r]++;
+                        $histG[$g]++;
+                        $histB[$b]++;
+                        $pixelCount++;
+                    }
+                }
+
+                if ($pixelCount === 0) {
+                    continue;
+                }
+
+                $clipThreshold = max(1, (int)round(($clipLimit * $pixelCount) / 256.0));
+
+                $histR = clipHistogram($histR, $clipThreshold);
+                $histG = clipHistogram($histG, $clipThreshold);
+                $histB = clipHistogram($histB, $clipThreshold);
+
+                $mapR = buildEqualizationMap($histR, $pixelCount);
+                $mapG = buildEqualizationMap($histG, $pixelCount);
+                $mapB = buildEqualizationMap($histB, $pixelCount);
+
+                $colorCache = [];
+
+                for ($y = $yStart; $y < $yEnd; $y++) {
+                    for ($x = $xStart; $x < $xEnd; $x++) {
+                        $color = imagecolorat($img, $x, $y);
+                        $r = ($color >> 16) & 0xFF;
+                        $g = ($color >> 8) & 0xFF;
+                        $b = $color & 0xFF;
+
+                        $nr = $mapR[$r];
+                        $ng = $mapG[$g];
+                        $nb = $mapB[$b];
+
+                        $key = ($nr << 16) | ($ng << 8) | $nb;
+                        if (!isset($colorCache[$key])) {
+                            $colorCache[$key] = imagecolorallocate($img, $nr, $ng, $nb);
+                        }
+
+                        imagesetpixel($img, $x, $y, $colorCache[$key]);
+                    }
+                }
+            }
+        }
+    }
+
+    function clipHistogram(array $hist, int $clipThreshold): array {
+        $bins = count($hist);
+        $excess = 0;
+        for ($i = 0; $i < $bins; $i++) {
+            if ($hist[$i] > $clipThreshold) {
+                $excess += $hist[$i] - $clipThreshold;
+                $hist[$i] = $clipThreshold;
+            }
+        }
+
+        if ($excess > 0) {
+            $increment = (int)floor($excess / $bins);
+            $remainder = $excess % $bins;
+            for ($i = 0; $i < $bins; $i++) {
+                $hist[$i] += $increment;
+            }
+            for ($i = 0; $i < $remainder; $i++) {
+                $hist[$i]++;
+            }
+        }
+
+        return $hist;
+    }
+
+    function buildEqualizationMap(array $hist, int $pixelCount): array {
+        $bins = count($hist);
+        $cdf = 0;
+        $scale = 255 / max(1, $pixelCount);
+        $map = array_fill(0, $bins, 0);
+
+        for ($i = 0; $i < $bins; $i++) {
+            $cdf += $hist[$i];
+            $value = (int)round($cdf * $scale);
+            if ($value < 0) $value = 0;
+            if ($value > 255) $value = 255;
+            $map[$i] = $value;
+        }
+
+        return $map;
+    }
+
+    /**
+     * Compute SSIM (Structural Similarity Index) score
+     */
+    function computeSSIMScore($img1, $img2): float {
         $width = imagesx($img1);
         $height = imagesy($img1);
-        
-        // Ensure images are the same size
+
         if ($width !== imagesx($img2) || $height !== imagesy($img2)) {
-            return 0;
+            return 0.0;
         }
-        
-        // Constants for SSIM calculation (standard values)
+
+        $windowSize = 8;
+        $stride = 4;
         $C1 = (0.01 * 255) ** 2;
         $C2 = (0.03 * 255) ** 2;
-        $C3 = $C2 / 2;
-        
-        $ssimTotal = 0;
-        $windowCount = 0;
-        
-        // Process image in windows
+
+        $total = 0.0;
+        $count = 0;
+
         for ($y = 0; $y <= $height - $windowSize; $y += $stride) {
             for ($x = 0; $x <= $width - $windowSize; $x += $stride) {
                 $window1 = [];
                 $window2 = [];
-                
-                // Extract window pixels
+
                 for ($wy = 0; $wy < $windowSize; $wy++) {
                     for ($wx = 0; $wx < $windowSize; $wx++) {
-                        $px1 = imagecolorat($img1, $x + $wx, $y + $wy);
-                        $px2 = imagecolorat($img2, $x + $wx, $y + $wy);
-                        
-                        // Convert to grayscale using standard luminance formula
-                        $r1 = ($px1 >> 16) & 0xFF;
-                        $g1 = ($px1 >> 8) & 0xFF;
-                        $b1 = $px1 & 0xFF;
-                        $l1 = (0.2126 * $r1 + 0.7152 * $g1 + 0.0722 * $b1);
-                        
-                        $r2 = ($px2 >> 16) & 0xFF;
-                        $g2 = ($px2 >> 8) & 0xFF;
-                        $b2 = $px2 & 0xFF;
-                        $l2 = (0.2126 * $r2 + 0.7152 * $g2 + 0.0722 * $b2);
-                        
-                        $window1[] = $l1;
-                        $window2[] = $l2;
+                        $window1[] = imagecolorat($img1, $x + $wx, $y + $wy) & 0xFF;
+                        $window2[] = imagecolorat($img2, $x + $wx, $y + $wy) & 0xFF;
                     }
                 }
-                
-                // Calculate means
+
                 $mu1 = array_sum($window1) / count($window1);
                 $mu2 = array_sum($window2) / count($window2);
-                
-                // Calculate variances and covariance
-                $sigma1_sq = 0;
-                $sigma2_sq = 0;
-                $sigma12 = 0;
-                
-                $count = count($window1);
-                for ($i = 0; $i < $count; $i++) {
-                    $sigma1_sq += pow($window1[$i] - $mu1, 2);
-                    $sigma2_sq += pow($window2[$i] - $mu2, 2);
+
+                $sigma1 = 0.0;
+                $sigma2 = 0.0;
+                $sigma12 = 0.0;
+
+                $n = count($window1);
+                for ($i = 0; $i < $n; $i++) {
+                    $sigma1 += ($window1[$i] - $mu1) ** 2;
+                    $sigma2 += ($window2[$i] - $mu2) ** 2;
                     $sigma12 += ($window1[$i] - $mu1) * ($window2[$i] - $mu2);
                 }
-                
-                $sigma1_sq = max(0, $sigma1_sq / ($count - 1));
-                $sigma2_sq = max(0, $sigma2_sq / ($count - 1));
-                $sigma12 = $sigma12 / ($count - 1);
-                
-                // Calculate SSIM for this window
+
+                $sigma1 = max(0.0, $sigma1 / ($n - 1));
+                $sigma2 = max(0.0, $sigma2 / ($n - 1));
+                $sigma12 = $sigma12 / ($n - 1);
+
                 $numerator = (2 * $mu1 * $mu2 + $C1) * (2 * $sigma12 + $C2);
-                $denominator = (($mu1 * $mu1) + ($mu2 * $mu2) + $C1) * ($sigma1_sq + $sigma2_sq + $C2);
-                
+                $denominator = (($mu1 ** 2) + ($mu2 ** 2) + $C1) * ($sigma1 + $sigma2 + $C2);
+
                 if ($denominator > 0) {
                     $ssim = $numerator / $denominator;
-                    // Clamp to [0, 1] range
-                    $ssim = max(0, min(1, $ssim));
-                    $ssimTotal += $ssim;
-                    $windowCount++;
+                    $total += max(0.0, min(1.0, $ssim));
+                    $count++;
                 }
             }
         }
-        
-        // Return average SSIM across all windows
-        return $windowCount > 0 ? $ssimTotal / $windowCount : 0;
+
+        return $count > 0 ? ($total / $count) : 0.0;
     }
-}
 
-if (!function_exists('loadImageResource')) {
     /**
-     * Compare two images and return a similarity score between 0 and 1
-     * 1 means identical, 0 means completely different
+     * Compute perceptual hash similarity
      */
-    function compareImagesSimilarity(string $baseImagePath, string $targetImagePath): ?float {
-        // Check if GD extension is loaded
-        if (!extension_loaded('gd')) {
-            error_log('GD extension not loaded');
-            return null;
-        }
+    function computePerceptualHashSimilarity($img1, $img2, int $hashSize = 16): float {
+        $hash1 = generateAverageHash($img1, $hashSize);
+        $hash2 = generateAverageHash($img2, $hashSize);
 
-        // Verify files exist and are readable
-        if (!is_readable($baseImagePath) || !is_readable($targetImagePath)) {
-            error_log('One or both image files are not readable');
-            return null;
-        }
+        $length = max(strlen($hash1), strlen($hash2));
+        if ($length === 0) return 0.0;
 
-        // Get image info to verify they are valid images
-        $baseInfo = @getimagesize($baseImagePath);
-        $targetInfo = @getimagesize($targetImagePath);
-        
-        if ($baseInfo === false || $targetInfo === false) {
-            error_log('One or both files are not valid images');
-            return null;
-        }
-
-        // Check if images are too small
-        if ($baseInfo[0] < 10 || $baseInfo[1] < 10 || $targetInfo[0] < 10 || $targetInfo[1] < 10) {
-            error_log('Images are too small for comparison');
-            return null;
-        }
-
-        // Load images with appropriate functions based on their type
-        $base = null;
-        $target = null;
-        
-        try {
-            // Create image resources based on file type
-            switch ($baseInfo[2]) {
-                case IMAGETYPE_JPEG:
-                    $base = @imagecreatefromjpeg($baseImagePath);
-                    break;
-                case IMAGETYPE_PNG:
-                    $base = @imagecreatefrompng($baseImagePath);
-                    // Preserve transparency
-                    imagealphablending($base, false);
-                    imagesavealpha($base, true);
-                    break;
-                case IMAGETYPE_GIF:
-                    $base = @imagecreatefromgif($baseImagePath);
-                    break;
-                default:
-                    error_log('Unsupported image type for base image');
-                    return null;
+        $distance = 0;
+        for ($i = 0; $i < $length; $i++) {
+            if (($hash1[$i] ?? '0') !== ($hash2[$i] ?? '0')) {
+                $distance++;
             }
-            
-            switch ($targetInfo[2]) {
-                case IMAGETYPE_JPEG:
-                    $target = @imagecreatefromjpeg($targetImagePath);
-                    break;
-                case IMAGETYPE_PNG:
-                    $target = @imagecreatefrompng($targetImagePath);
-                    // Preserve transparency
-                    imagealphablending($target, false);
-                    imagesavealpha($target, true);
-                    break;
-                case IMAGETYPE_GIF:
-                    $target = @imagecreatefromgif($targetImagePath);
-                    break;
-                default:
-                    error_log('Unsupported image type for target image');
-                    if ($base) imagedestroy($base);
-                    return null;
-            }
+        }
 
-            if (!$base || !$target) {
-                throw new Exception('Failed to load one or both images');
-            }
-            
-            // Resize images to a common size for comparison (256x256 is a good balance between speed and accuracy)
-            $width = 256;
-        $height = 64;
-
-        $baseResized = imagecreatetruecolor($width, $height);
-        $targetResized = imagecreatetruecolor($width, $height);
-
-        // Convert to grayscale and resize
-        imagecopyresampled($baseResized, $base, 0, 0, 0, 0, $width, $height, imagesx($base), imagesy($base));
-        imagecopyresampled($targetResized, $target, 0, 0, 0, 0, $width, $height, imagesx($target), imagesy($target));
-
-        // Calculate SSIM (Structural Similarity Index)
-        $ssim = calculateSSIM($baseResized, $targetResized);
-        
-        // Convert SSIM from [-1, 1] to [0, 100] scale
-        $similarity = (($ssim + 1) / 2) * 100;
-
-        // Clean up
-        imagedestroy($base);
-        imagedestroy($target);
-        imagedestroy($baseResized);
-        imagedestroy($targetResized);
-
-        return max(0, min(100, $similarity));
+        return 1 - ($distance / $length);
     }
-}
 
-if (!function_exists('getImageVerdict')) {
     /**
-     * Determine the verification verdict based on similarity score and item size
+     * Generate average hash
      */
-    function getImageVerdict(float $similarity, string $sizeCategory): array {
-        $verdict = '';
-        $needsReview = true;
-        $confidence = 'low';
-        
-        // Define thresholds based on item size
-        $thresholds = [
-            'small' => [
-                'verified' => 0.92,  // 92% for auto-verification of small items
-                'review' => 0.85,    // 85-92% needs review
-                'damaged' => 0.85    // Below 85% flagged as damaged
-            ],
-            'medium' => [
-                'verified' => 0.95,  // 95% for auto-verification of medium items
-                'review' => 0.88,    // 88-95% needs review
-                'damaged' => 0.88    // Below 88% flagged as damaged
-            ],
-            'large' => [
-                'verified' => 1.0,   // Large items always need review
-                'review' => 0.9,     // 90%+ can be auto-verified after review
-                'damaged' => 0.9     // Below 90% flagged as damaged
-            ]
-        ][$sizeCategory] ?? [
-            'verified' => 0.9,      // Default thresholds
-            'review' => 0.8,
-            'damaged' => 0.8
-        ];
-        
-        // Determine verdict
-        if ($similarity >= $thresholds['verified']) {
-            $verdict = 'Verified Match';
-            $needsReview = $sizeCategory === 'large'; // Large items always need review
-            $confidence = 'high';
-        } elseif ($similarity >= $thresholds['review']) {
-            $verdict = 'Possible Damage – Needs Review';
-            $needsReview = true;
-            $confidence = 'medium';
-        } else {
-            $verdict = 'Flagged – Damage Detected';
-            $needsReview = true;
-            $confidence = 'high';
+    function generateAverageHash($image, int $hashSize = 16): string {
+        $hashSize = max(4, min(32, $hashSize));
+        $resized = imagecreatetruecolor($hashSize, $hashSize);
+        imagecopyresampled($resized, $image, 0, 0, 0, 0, $hashSize, $hashSize, imagesx($image), imagesy($image));
+        imagefilter($resized, IMG_FILTER_GRAYSCALE);
+
+        $total = 0.0;
+        $pixels = [];
+        for ($y = 0; $y < $hashSize; $y++) {
+            for ($x = 0; $x < $hashSize; $x++) {
+                $value = imagecolorat($resized, $x, $y) & 0xFF;
+                $pixels[] = $value;
+                $total += $value;
+            }
         }
-        
+        $avg = $total / count($pixels);
+
+        $hash = '';
+        foreach ($pixels as $value) {
+            $hash .= ($value >= $avg) ? '1' : '0';
+        }
+
+        imagedestroy($resized);
+        return $hash;
+    }
+
+    /**
+     * Compute pixel-level difference score
+     */
+    function computePixelDifferenceScore($img1, $img2): float {
+        $width = imagesx($img1);
+        $height = imagesy($img1);
+
+        if ($width !== imagesx($img2) || $height !== imagesy($img2)) {
+            return 0.0;
+        }
+
+        $step = max(1, (int)floor($width * $height / 65536));
+        $totalDiff = 0.0;
+        $samples = 0;
+
+        for ($y = 0; $y < $height; $y += $step) {
+            for ($x = 0; $x < $width; $x += $step) {
+                $l1 = imagecolorat($img1, $x, $y) & 0xFF;
+                $l2 = imagecolorat($img2, $x, $y) & 0xFF;
+                $totalDiff += abs($l1 - $l2);
+                $samples++;
+            }
+        }
+
+        if ($samples === 0) return 0.0;
+
+        $avgDiff = $totalDiff / $samples;
+        $similarity = 1.0 - min(1.0, $avgDiff / 255.0);
+
+        return max(0.0, min(1.0, $similarity));
+    }
+
+    /**
+     * Analyse luminance statistics for normalization
+     */
+    function calculateLuminanceStats($img): array {
+        $width = imagesx($img);
+        $height = imagesy($img);
+        $step = max(1, (int)floor(sqrt(($width * $height) / 65536)));
+        $sum = 0.0;
+        $sumSquares = 0.0;
+        $count = 0;
+
+        for ($y = 0; $y < $height; $y += $step) {
+            for ($x = 0; $x < $width; $x += $step) {
+                $value = imagecolorat($img, $x, $y) & 0xFF;
+                $sum += $value;
+                $sumSquares += $value * $value;
+                $count++;
+            }
+        }
+
+        if ($count === 0) {
+            return ['mean' => 128.0, 'stddev' => 64.0];
+        }
+
+        $mean = $sum / $count;
+        $variance = max(1.0, ($sumSquares / $count) - ($mean * $mean));
+
         return [
-            'verdict' => $verdict,
-            'needsReview' => $needsReview,
-            'confidence' => $confidence,
-            'similarity' => $similarity,
-            'thresholds' => $thresholds
+            'mean' => $mean,
+            'stddev' => sqrt($variance)
         ];
     }
-}
 
-if (!function_exists('analyzeImageDifferences')) {
-        /**
-     * Analyze differences between reference and return images
-     * 
-     * @param string $referencePath Path to the reference image
-     * @param string $returnPath Path to the returned item image
-     * @param int $grid Number of grid cells for analysis (e.g., 4 = 4x4 grid)
-     * @param string $sizeCategory Size category of the item (small, medium, large)
-     * @return array Analysis results including similarity score and difference details
+    /**
+     * Adjust image luminance to target mean and stddev
      */
-    function analyzeImageDifferences(string $referencePath, string $returnPath, int $grid = 4, string $sizeCategory = 'medium'): array {
-        $result = [
-            'similarity' => 0,
-            'verdict' => 'Unknown',
-            'confidence' => 0,
-            'issues' => [],
-            'grid_analysis' => [],
-            'metadata' => [
-                'reference_size' => @getimagesize($referencePath),
-                'return_size' => @getimagesize($returnPath),
-                'comparison_time' => date('Y-m-d H:i:s')
-            ]
+    function adjustImageLuminance($img, float $targetMean, float $targetStd, array $stats): void {
+        $width = imagesx($img);
+        $height = imagesy($img);
+        $currentMean = $stats['mean'] ?? 128.0;
+        $currentStd = max(1.0, $stats['stddev'] ?? 64.0);
+
+        $scale = $targetStd / $currentStd;
+        $scale = max(0.5, min(2.5, $scale));
+        $offset = $targetMean - ($currentMean * $scale);
+
+        $colorCache = [];
+
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $value = imagecolorat($img, $x, $y) & 0xFF;
+                $adjusted = (int)round(($value * $scale) + $offset);
+                if ($adjusted < 0) $adjusted = 0;
+                if ($adjusted > 255) $adjusted = 255;
+
+                if (!isset($colorCache[$adjusted])) {
+                    $colorCache[$adjusted] = imagecolorallocate($img, $adjusted, $adjusted, $adjusted);
+                }
+
+                imagesetpixel($img, $x, $y, $colorCache[$adjusted]);
+            }
+        }
+    }
+
+    /**
+     * Compute histogram similarity (color/brightness distribution)
+     */
+    function computeHistogramSimilarity($img1, $img2): float {
+        $width = imagesx($img1);
+        $height = imagesy($img1);
+
+        if ($width !== imagesx($img2) || $height !== imagesy($img2)) {
+            return 0.0;
+        }
+
+        $bins = 16;
+        $hist1 = [
+            'r' => array_fill(0, $bins, 0.0),
+            'g' => array_fill(0, $bins, 0.0),
+            'b' => array_fill(0, $bins, 0.0),
+        ];
+        $hist2 = [
+            'r' => array_fill(0, $bins, 0.0),
+            'g' => array_fill(0, $bins, 0.0),
+            'b' => array_fill(0, $bins, 0.0),
         ];
 
-        // Check if GD is loaded
-        if (!extension_loaded('gd')) {
-            $result['issues'][] = 'GD extension not available';
-            $result['verdict'] = 'Error: GD extension required';
-            return $result;
+        $step = max(1, (int)floor(sqrt(($width * $height) / 16384)));
+        $samples = 0;
+
+        for ($y = 0; $y < $height; $y += $step) {
+            for ($x = 0; $x < $width; $x += $step) {
+                $color1 = imagecolorat($img1, $x, $y);
+                $color2 = imagecolorat($img2, $x, $y);
+
+                $r1 = ($color1 >> 16) & 0xFF;
+                $g1 = ($color1 >> 8) & 0xFF;
+                $b1 = $color1 & 0xFF;
+
+                $r2 = ($color2 >> 16) & 0xFF;
+                $g2 = ($color2 >> 8) & 0xFF;
+                $b2 = $color2 & 0xFF;
+
+                $binR1 = min($bins - 1, (int)floor($r1 / 256 * $bins));
+                $binG1 = min($bins - 1, (int)floor($g1 / 256 * $bins));
+                $binB1 = min($bins - 1, (int)floor($b1 / 256 * $bins));
+
+                $binR2 = min($bins - 1, (int)floor($r2 / 256 * $bins));
+                $binG2 = min($bins - 1, (int)floor($g2 / 256 * $bins));
+                $binB2 = min($bins - 1, (int)floor($b2 / 256 * $bins));
+
+                $hist1['r'][$binR1]++;
+                $hist1['g'][$binG1]++;
+                $hist1['b'][$binB1]++;
+
+                $hist2['r'][$binR2]++;
+                $hist2['g'][$binG2]++;
+                $hist2['b'][$binB2]++;
+
+                $samples++;
+            }
         }
 
-        // Check if files are readable
-        if (!is_readable($referencePath) || !is_readable($returnPath)) {
-            $result['issues'][] = 'Could not read image files';
-            $result['verdict'] = 'Error: File access denied';
-            return $result;
+        if ($samples === 0) {
+            return 0.0;
         }
 
-        // Load images
-        $reference = @imagecreatefromstring(@file_get_contents($referencePath));
-        $returned = @imagecreatefromstring(@file_get_contents($returnPath));
-
-        if (!$reference || !$returned) {
-            if ($reference) imagedestroy($reference);
-            if ($returned) imagedestroy($returned);
-            $result['issues'][] = 'Invalid image format';
-            $result['verdict'] = 'Error: Invalid image format';
-            return $result;
+        $similarities = [];
+        foreach (['r', 'g', 'b'] as $channel) {
+            $similarities[] = calculateHistogramCorrelation($hist1[$channel], $hist2[$channel]);
         }
 
-        // Calculate overall similarity using SSIM
-        $similarity = compareImagesSimilarity($referencePath, $returnPath);
-        if ($similarity === null) {
-            $result['verdict'] = 'Error: Could not compare images';
-            return $result;
+        $average = array_sum($similarities) / count($similarities);
+        return max(0.0, min(1.0, $average));
+    }
+
+    function calculateHistogramCorrelation(array $hist1, array $hist2): float {
+        $bins = count($hist1);
+        if ($bins === 0 || $bins !== count($hist2)) {
+            return 0.0;
         }
 
-        $result['similarity'] = round($similarity, 2);
-        $result['confidence'] = min(100, max(0, $similarity));
+        $sum1 = array_sum($hist1);
+        $sum2 = array_sum($hist2);
+
+        if ($sum1 <= 0 || $sum2 <= 0) {
+            return 0.0;
+        }
+
+        $mean1 = $sum1 / $bins;
+        $mean2 = $sum2 / $bins;
+
+        $numerator = 0.0;
+        $denom1 = 0.0;
+        $denom2 = 0.0;
+
+        for ($i = 0; $i < $bins; $i++) {
+            $diff1 = ($hist1[$i] - $mean1) / $sum1;
+            $diff2 = ($hist2[$i] - $mean2) / $sum2;
+            $numerator += $diff1 * $diff2;
+            $denom1 += $diff1 * $diff1;
+            $denom2 += $diff2 * $diff2;
+        }
+
+        $denominator = sqrt($denom1 * $denom2);
+        if ($denominator <= 1e-8) {
+            return 1.0;
+        }
+
+        $correlation = $numerator / $denominator;
+        return max(0.0, min(1.0, ($correlation + 1.0) / 2.0));
+    }
+
+    /**
+     * Compute edge difference (shape/structure changes)
+     */
+    function computeEdgeDifference($img1, $img2): float {
+        $width = imagesx($img1);
+        $height = imagesy($img1);
         
-        // Determine verdict based on similarity score
-        if ($similarity >= 85) {
-            $result['verdict'] = 'Verified Match';
-        } elseif ($similarity >= 70) {
-            $result['verdict'] = 'Possible Damage – Needs Review';
-            $result['issues'][] = [
-                'type' => 'possible_damage',
-                'severity' => 'medium',
-                'message' => 'Possible damage detected. Please review the item.'
-            ];
-        } else {
-            $result['verdict'] = 'Flagged – Damage Detected';
-            $result['issues'][] = [
-                'type' => 'damage',
-                'severity' => 'high',
-                'message' => 'Significant differences detected. Item may be damaged.'
-            ];
+        if ($width !== imagesx($img2) || $height !== imagesy($img2)) {
+            return 1.0;
+        }
+        
+        // Simple edge detection using Sobel-like operator
+        $edges1 = detectEdges($img1);
+        $edges2 = detectEdges($img2);
+        
+        $diffPixels = 0;
+        $totalEdgePixels = 0;
+        
+        $step = max(1, (int)floor(sqrt($width * $height / 10000)));
+        
+        for ($y = 1; $y < $height - 1; $y += $step) {
+            for ($x = 1; $x < $width - 1; $x += $step) {
+                $e1 = $edges1[$y][$x] ?? 0;
+                $e2 = $edges2[$y][$x] ?? 0;
+                
+                if ($e1 > 0 || $e2 > 0) {
+                    $totalEdgePixels++;
+                    if (abs($e1 - $e2) > 0.3) {
+                        $diffPixels++;
+                    }
+                }
+            }
+        }
+        
+        if ($totalEdgePixels === 0) return 0.0;
+        
+        return min(1.0, $diffPixels / $totalEdgePixels);
+    }
+
+    /**
+     * Simple edge detection
+     */
+    function detectEdges($img): array {
+        $width = imagesx($img);
+        $height = imagesy($img);
+        $edges = [];
+        
+        for ($y = 1; $y < $height - 1; $y++) {
+            $edges[$y] = [];
+            for ($x = 1; $x < $width - 1; $x++) {
+                $gx = 0;
+                $gy = 0;
+                
+                // Sobel operator
+                $p00 = imagecolorat($img, $x - 1, $y - 1) & 0xFF;
+                $p01 = imagecolorat($img, $x, $y - 1) & 0xFF;
+                $p02 = imagecolorat($img, $x + 1, $y - 1) & 0xFF;
+                $p10 = imagecolorat($img, $x - 1, $y) & 0xFF;
+                $p12 = imagecolorat($img, $x + 1, $y) & 0xFF;
+                $p20 = imagecolorat($img, $x - 1, $y + 1) & 0xFF;
+                $p21 = imagecolorat($img, $x, $y + 1) & 0xFF;
+                $p22 = imagecolorat($img, $x + 1, $y + 1) & 0xFF;
+                
+                $gx = (-$p00 + $p02 - 2*$p10 + 2*$p12 - $p20 + $p22);
+                $gy = (-$p00 - 2*$p01 - $p02 + $p20 + 2*$p21 + $p22);
+                
+                $magnitude = sqrt($gx * $gx + $gy * $gy) / 1448.0; // Normalize
+                $edges[$y][$x] = min(1.0, $magnitude);
+            }
+        }
+        
+        return $edges;
+    }
+
+    /**
+     * Compare gradient orientation histograms to gauge rotational similarity
+     */
+    function computeGradientOrientationSimilarity($img1, $img2): float {
+        $width = imagesx($img1);
+        $height = imagesy($img1);
+
+        if ($width !== imagesx($img2) || $height !== imagesy($img2)) {
+            return 0.0;
         }
 
-        // Grid-based analysis for localized differences
-        $width = imagesx($reference);
-        $height = imagesy($returned);
-        $blockWidth = (int)($width / $grid);
-        $blockHeight = (int)($height / $grid);
+        if ($width < 3 || $height < 3) {
+            return 0.0;
+        }
 
-        for ($i = 0; $i < $grid; $i++) {
-            for ($j = 0; $j < $grid; $j++) {
-                $x = $i * $blockWidth;
-                $y = $j * $blockHeight;
-                
-                // Create temporary images for the grid cell
-                $cellRef = imagecrop($reference, [
-                    'x' => $x,
-                    'y' => $y,
-                    'width' => $blockWidth,
-                    'height' => $blockHeight
-                ]);
-                
-                $cellRet = imagecrop($returned, [
-                    'x' => $x,
-                    'y' => $y,
-                    'width' => $blockWidth,
-                    'height' => $blockHeight
-                ]);
-                
-                if ($cellRef && $cellRet) {
-                    // Save to temp files for comparison
-                    $tempRef = tempnam(sys_get_temp_dir(), 'ref_');
-                    $tempRet = tempnam(sys_get_temp_dir(), 'ret_');
-                    
-                    imagejpeg($cellRef, $tempRef, 90);
-                    imagejpeg($cellRet, $tempRet, 90);
-                    
-                    $cellSimilarity = compareImagesSimilarity($tempRef, $tempRet);
-                    
-                    // Clean up temp files
-                    @unlink($tempRef);
-                    @unlink($tempRet);
-                    
-                    $result['grid_analysis'][] = [
-                        'x' => $i,
-                        'y' => $j,
-                        'similarity' => $cellSimilarity,
-                        'has_issue' => $cellSimilarity < 70,
-                        'verdict' => $cellSimilarity >= 85 ? 'Good' : 
-                                    ($cellSimilarity >= 70 ? 'Review' : 'Issue')
-                    ];
-                    
-                    imagedestroy($cellRef);
-                    imagedestroy($cellRet);
+        $bins = 12;
+        $hist1 = array_fill(0, $bins, 0.0);
+        $hist2 = array_fill(0, $bins, 0.0);
+
+        $step = max(1, (int)floor(sqrt(($width * $height) / 16384)));
+        $twoPi = 2.0 * M_PI;
+
+        for ($y = 1; $y < $height - 1; $y += $step) {
+            for ($x = 1; $x < $width - 1; $x += $step) {
+                $gx1 = (imagecolorat($img1, $x + 1, $y) & 0xFF) - (imagecolorat($img1, $x - 1, $y) & 0xFF);
+                $gy1 = (imagecolorat($img1, $x, $y + 1) & 0xFF) - (imagecolorat($img1, $x, $y - 1) & 0xFF);
+                $mag1 = sqrt(($gx1 * $gx1) + ($gy1 * $gy1));
+
+                $gx2 = (imagecolorat($img2, $x + 1, $y) & 0xFF) - (imagecolorat($img2, $x - 1, $y) & 0xFF);
+                $gy2 = (imagecolorat($img2, $x, $y + 1) & 0xFF) - (imagecolorat($img2, $x, $y - 1) & 0xFF);
+                $mag2 = sqrt(($gx2 * $gx2) + ($gy2 * $gy2));
+
+                if ($mag1 > 4.0) {
+                    $angle1 = atan2($gy1, $gx1);
+                    if ($angle1 < 0) {
+                        $angle1 += $twoPi;
+                    }
+                    $bin1 = (int)floor($angle1 / $twoPi * $bins);
+                    if ($bin1 >= $bins) $bin1 = $bins - 1;
+                    $hist1[$bin1] += $mag1;
+                }
+
+                if ($mag2 > 4.0) {
+                    $angle2 = atan2($gy2, $gx2);
+                    if ($angle2 < 0) {
+                        $angle2 += $twoPi;
+                    }
+                    $bin2 = (int)floor($angle2 / $twoPi * $bins);
+                    if ($bin2 >= $bins) $bin2 = $bins - 1;
+                    $hist2[$bin2] += $mag2;
                 }
             }
         }
 
-        // Clean up
-        imagedestroy($reference);
-        imagedestroy($returned);
+        $sum1 = array_sum($hist1);
+        $sum2 = array_sum($hist2);
 
-        return $result;
+        if ($sum1 <= 0 && $sum2 <= 0) {
+            return 1.0;
+        }
+
+        if ($sum1 <= 0 || $sum2 <= 0) {
+            return 0.0;
+        }
+
+        $similarity = 0.0;
+        for ($i = 0; $i < $bins; $i++) {
+            $p1 = $hist1[$i] / $sum1;
+            $p2 = $hist2[$i] / $sum2;
+            $similarity += min($p1, $p2);
+        }
+
+        return max(0.0, min(1.0, $similarity));
     }
-}
 
-if (!function_exists('drawGridOnImage')) {
     /**
-     * Draw a grid on an image for visualization
+     * Compute object presence score (detects missing or completely different objects)
      */
-    function drawGridOnImage($image, $gridSize, $color) {
-        $width = imagesx($image);
-        $height = imagesy($image);
-        $cellWidth = $width / $gridSize;
-        $cellHeight = $height / $gridSize;
-        
-        // Draw vertical lines
-        for ($i = 1; $i < $gridSize; $i++) {
-            $x = (int)($i * $cellWidth);
-            imageline($image, $x, 0, $x, $height - 1, $color);
-        }
-        
-        // Draw horizontal lines
-        for ($i = 1; $i < $gridSize; $i++) {
-            $y = (int)($i * $cellHeight);
-            imageline($image, 0, $y, $width - 1, $y, $color);
-        }
-        
-        return $image;
-    }
-}
+    function computeObjectPresenceScore($img1, $img2): float {
+        $width = imagesx($img1);
+        $height = imagesy($img1);
 
-if (!function_exists('addTextToImage')) {
+        if ($width !== imagesx($img2) || $height !== imagesy($img2)) {
+            return 0.0;
+        }
+
+        if ($width < 3 || $height < 3) {
+            return 0.0;
+        }
+
+        // Count significant edge pixels in each image
+        $edgeThreshold = 20;
+        $edgeCount1 = 0;
+        $edgeCount2 = 0;
+        $totalPixels = 0;
+
+        $step = max(1, (int)floor(sqrt(($width * $height) / 16384)));
+
+        for ($y = 1; $y < $height - 1; $y += $step) {
+            for ($x = 1; $x < $width - 1; $x += $step) {
+                $gx1 = abs((imagecolorat($img1, $x + 1, $y) & 0xFF) - (imagecolorat($img1, $x - 1, $y) & 0xFF));
+                $gy1 = abs((imagecolorat($img1, $x, $y + 1) & 0xFF) - (imagecolorat($img1, $x, $y - 1) & 0xFF));
+                $mag1 = sqrt(($gx1 * $gx1) + ($gy1 * $gy1));
+
+                $gx2 = abs((imagecolorat($img2, $x + 1, $y) & 0xFF) - (imagecolorat($img2, $x - 1, $y) & 0xFF));
+                $gy2 = abs((imagecolorat($img2, $x, $y + 1) & 0xFF) - (imagecolorat($img2, $x, $y - 1) & 0xFF));
+                $mag2 = sqrt(($gx2 * $gx2) + ($gy2 * $gy2));
+
+                if ($mag1 > $edgeThreshold) {
+                    $edgeCount1++;
+                }
+                if ($mag2 > $edgeThreshold) {
+                    $edgeCount2++;
+                }
+                $totalPixels++;
+            }
+        }
+
+        if ($totalPixels === 0) {
+            return 0.0;
+        }
+
+        $edgeDensity1 = $edgeCount1 / $totalPixels;
+        $edgeDensity2 = $edgeCount2 / $totalPixels;
+
+        // If one image has very few edges (blank/blurry) and the other has many, object is likely missing
+        if ($edgeDensity1 < 0.02 || $edgeDensity2 < 0.02) {
+            return min($edgeDensity1, $edgeDensity2) / max(0.001, max($edgeDensity1, $edgeDensity2)) * 100;
+        }
+
+        // Compare edge density ratio
+        $densityRatio = min($edgeDensity1, $edgeDensity2) / max(0.001, max($edgeDensity1, $edgeDensity2));
+
+        // Compare spatial overlap of edges
+        $overlapCount = 0;
+        for ($y = 1; $y < $height - 1; $y += $step) {
+            for ($x = 1; $x < $width - 1; $x += $step) {
+                $gx1 = abs((imagecolorat($img1, $x + 1, $y) & 0xFF) - (imagecolorat($img1, $x - 1, $y) & 0xFF));
+                $gy1 = abs((imagecolorat($img1, $x, $y + 1) & 0xFF) - (imagecolorat($img1, $x, $y - 1) & 0xFF));
+                $mag1 = sqrt(($gx1 * $gx1) + ($gy1 * $gy1));
+
+                $gx2 = abs((imagecolorat($img2, $x + 1, $y) & 0xFF) - (imagecolorat($img2, $x - 1, $y) & 0xFF));
+                $gy2 = abs((imagecolorat($img2, $x, $y + 1) & 0xFF) - (imagecolorat($img2, $x, $y - 1) & 0xFF));
+                $mag2 = sqrt(($gx2 * $gx2) + ($gy2 * $gy2));
+
+                if ($mag1 > $edgeThreshold && $mag2 > $edgeThreshold) {
+                    $overlapCount++;
+                }
+            }
+        }
+
+        $overlapRatio = $overlapCount / max(1, min($edgeCount1, $edgeCount2));
+
+        // Combine density ratio and spatial overlap
+        $presenceScore = ($densityRatio * 0.4 + $overlapRatio * 0.6);
+
+        return max(0.0, min(1.0, $presenceScore));
+    }
+
     /**
-     * Add text to an image with a background
+     * Generate comparison preview image (side-by-side with diff overlay)
      */
-    function addTextToImage($image, $text, $x, $y, $fontSize = 5, $textColor = null, $bgColor = null) {
-        if ($textColor === null) {
-            $textColor = imagecolorallocate($image, 255, 255, 255); // White
-        }
+    function generateComparisonPreview(string $referencePath, string $returnPath, string $outputPath): bool {
+        $ref = @imagecreatefromstring(@file_get_contents($referencePath));
+        $ret = @imagecreatefromstring(@file_get_contents($returnPath));
         
-        if ($bgColor === null) {
-            $bgColor = imagecolorallocatealpha($image, 0, 0, 0, 50); // Semi-transparent black
-        }
-        
-        // Get text dimensions
-        $textWidth = imagefontwidth($fontSize) * strlen($text);
-        $textHeight = imagefontheight($fontSize);
-        
-        // Add background
-        imagefilledrectangle(
-            $image, 
-            $x - 2, 
-            $y - $textHeight - 2, 
-            $x + $textWidth + 2, 
-            $y + 2, 
-            $bgColor
-        );
-        
-        // Add text
-        imagestring($image, $fontSize, $x, $y - $textHeight, $text, $textColor);
-        
-        return $image;
-    }
-}
-
-if (!function_exists('generateComparisonPreview')) {
-        /**
-     * Generate a side-by-side comparison image with annotations
-     * 
-     * @param string $referencePath Path to the reference image
-     * @param string $returnPath Path to the returned item image
-     * @param string $outputPath Path to save the output image
-     * @param array $analysis Optional analysis results from analyzeImageDifferences()
-     * @return bool True on success, false on failure
-     */
-    function generateComparisonPreview(string $referencePath, string $returnPath, string $outputPath, array $analysis = []): bool {
-        if (!extension_loaded('gd')) {
+        if (!$ref || !$ret) {
+            if ($ref) imagedestroy($ref);
+            if ($ret) imagedestroy($ret);
             return false;
         }
-
-        // Load images with error handling
-        $reference = @imagecreatefromstring(@file_get_contents($referencePath));
-        $returned = @imagecreatefromstring(@file_get_contents($returnPath));
         
-        if (!$reference || !$returned) {
-            if ($reference) imagedestroy($reference);
-            if ($returned) imagedestroy($returned);
-            return false;
-        }
-
-        // Get dimensions
-        $refWidth = imagesx($reference);
-        $refHeight = imagesy($reference);
-        $retWidth = imagesx($returned);
-        $retHeight = imagesy($returned);
+        $thumbSize = 200;
+        $refThumb = imagecreatetruecolor($thumbSize, $thumbSize);
+        $retThumb = imagecreatetruecolor($thumbSize, $thumbSize);
         
-        // Calculate new dimensions maintaining aspect ratio
-        $maxWidth = 400;
-        $maxHeight = 300;
+        imagecopyresampled($refThumb, $ref, 0, 0, 0, 0, $thumbSize, $thumbSize, imagesx($ref), imagesy($ref));
+        imagecopyresampled($retThumb, $ret, 0, 0, 0, 0, $thumbSize, $thumbSize, imagesx($ret), imagesy($ret));
         
-        $refRatio = $refWidth / $refHeight;
-        $retRatio = $retWidth / $retHeight;
-        
-        $newRefWidth = min($maxWidth, $refWidth);
-        $newRefHeight = $newRefWidth / $refRatio;
-        
-        if ($newRefHeight > $maxHeight) {
-            $newRefHeight = $maxHeight;
-            $newRefWidth = $newRefHeight * $refRatio;
-        }
-        
-        $newRetWidth = min($maxWidth, $retWidth);
-        $newRetHeight = $newRetWidth / $retRatio;
-        
-        if ($newRetHeight > $maxHeight) {
-            $newRetHeight = $maxHeight;
-            $newRetWidth = $newRetHeight * $retRatio;
-        }
-        
-        // Create resized images
-        $refResized = imagecreatetruecolor($newRefWidth, $newRefHeight);
-        $retResized = imagecreatetruecolor($newRetWidth, $newRetHeight);
-        
-        // Preserve transparency for PNGs
-        imagealphablending($refResized, false);
-        imagesavealpha($refResized, true);
-        imagealphablending($retResized, false);
-        imagesavealpha($retResized, true);
-        
-        // Resize images
-        imagecopyresampled($refResized, $reference, 0, 0, 0, 0, $newRefWidth, $newRefHeight, $refWidth, $refHeight);
-        imagecopyresampled($retResized, $returned, 0, 0, 0, 0, $newRetWidth, $newRetHeight, $retWidth, $retHeight);
-        
-        // Calculate canvas size
-        $gap = 20;
-        $padding = 20;
-        $labelHeight = 30;
-        $canvasWidth = $newRefWidth + $newRetWidth + $gap + ($padding * 2);
-        $canvasHeight = max($newRefHeight, $newRetHeight) + $padding * 2 + $labelHeight;
-        
-        // Create canvas
-        $canvas = imagecreatetruecolor($canvasWidth, $canvasHeight);
-        
-        // Fill background
-        $bgColor = imagecolorallocate($canvas, 248, 249, 250);
-        $borderColor = imagecolorallocate($canvas, 222, 226, 230);
-        $textColor = imagecolorallocate($canvas, 33, 37, 41);
-        $highlightColor = imagecolorallocate($canvas, 0, 123, 255);
-        
-        imagefilledrectangle($canvas, 0, 0, $canvasWidth, $canvasHeight, $bgColor);
-        
-        // Add title
-        $title = 'Item Comparison - ' . date('Y-m-d H:i:s');
-        $titleX = ($canvasWidth - 8 * strlen($title)) / 2;
-        imagestring($canvas, 3, $titleX, 5, $title, $textColor);
-        
-        // Draw reference image with border
-        $refX = $padding;
-        $refY = $padding + $labelHeight;
-        $refBorder = imagecreatetruecolor($newRefWidth + 4, $newRefHeight + 4);
-        $borderColor = imagecolorallocate($refBorder, 206, 212, 218);
-        imagefill($refBorder, 0, 0, $borderColor);
-        imagecopy($refBorder, $refResized, 2, 2, 0, 0, $newRefWidth, $newRefHeight);
-        imagecopy($canvas, $refBorder, $refX - 2, $refY - 2, 0, 0, $newRefWidth + 4, $newRefHeight + 4);
-        
-        // Draw return image with border
-        $retX = $padding + $newRefWidth + $gap;
-        $retY = $padding + $labelHeight;
-        $retBorder = imagecreatetruecolor($newRetWidth + 4, $newRetHeight + 4);
-        imagefill($retBorder, 0, 0, $borderColor);
-        imagecopy($retBorder, $retResized, 2, 2, 0, 0, $newRetWidth, $newRetHeight);
-        imagecopy($canvas, $retBorder, $retX - 2, $retY - 2, 0, 0, $newRetWidth + 4, $newRetHeight + 4);
+        // Create combined preview
+        $preview = imagecreatetruecolor($thumbSize * 2 + 20, $thumbSize + 40);
+        $white = imagecolorallocate($preview, 255, 255, 255);
+        $black = imagecolorallocate($preview, 0, 0, 0);
+        imagefill($preview, 0, 0, $white);
         
         // Add labels
-        $font = 3; // Built-in font (1-5)
-        $labelY = $padding + $labelHeight + max($newRefHeight, $newRetHeight) + 5;
+        imagestring($preview, 3, 10, 5, 'Reference', $black);
+        imagestring($preview, 3, $thumbSize + 30, 5, 'Return', $black);
         
-        // Add reference label with arrow
-        $refLabel = 'Original (Borrowed)';
-        $refLabelWidth = imagefontwidth($font) * strlen($refLabel);
-        $refLabelX = $refX + (($newRefWidth - $refLabelWidth) / 2);
-        imagestring($canvas, $font, $refLabelX, $refY - 20, $refLabel, $textColor);
+        // Copy thumbnails
+        imagecopy($preview, $refThumb, 10, 25, 0, 0, $thumbSize, $thumbSize);
+        imagecopy($preview, $retThumb, $thumbSize + 20, 25, 0, 0, $thumbSize, $thumbSize);
         
-        // Add return label with arrow
-        $retLabel = 'Returned';
-        $retLabelWidth = imagefontwidth($font) * strlen($retLabel);
-        $retLabelX = $retX + (($newRetWidth - $retLabelWidth) / 2);
-        imagestring($canvas, $font, $retLabelX, $retY - 20, $retLabel, $textColor);
+        $result = imagejpeg($preview, $outputPath, 85);
         
-        // Add comparison info
-        $similarity = compareImagesSimilarity($referencePath, $returnPath);
-        if ($similarity !== null) {
-            $infoText = sprintf('Similarity: %.1f%%', $similarity);
-            $infoX = $canvasWidth - $padding - (imagefontwidth($font) * strlen($infoText));
-            imagestring($canvas, $font, $infoX, 5, $infoText, $highlightColor);
-            
-            // Add verdict
-            $verdict = '';
-            $verdictColor = $textColor;
-            
-            if ($similarity >= 85) {
-                $verdict = '✓ Verified Match';
-                $verdictColor = imagecolorallocate($canvas, 40, 167, 69); // Green
-            } elseif ($similarity >= 70) {
-                $verdict = '⚠ Needs Review';
-                $verdictColor = imagecolorallocate($canvas, 255, 193, 7); // Yellow
-            } else {
-                $verdict = '✗ Damage Detected';
-                $verdictColor = imagecolorallocate($canvas, 220, 53, 69); // Red
-            }
-            
-            imagestring($canvas, $font + 1, $padding, 5, $verdict, $verdictColor);
-        }
+        imagedestroy($ref);
+        imagedestroy($ret);
+        imagedestroy($refThumb);
+        imagedestroy($retThumb);
+        imagedestroy($preview);
         
-        // Save the output image
-        $dir = dirname($outputPath);
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0755, true);
-        }
-        
-        $result = imagejpeg($canvas, $outputPath, 90);
-        
-        // Clean up
-        imagedestroy($canvas);
-        imagedestroy($reference);
-        imagedestroy($returned);
-        imagedestroy($refResized);
-        imagedestroy($retResized);
-        imagedestroy($refBorder);
-        imagedestroy($retBorder);
-        
-        return $result !== false;
+        return $result;
     }
 }

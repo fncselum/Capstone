@@ -317,6 +317,15 @@ if (!$all_transactions) {
             background: #fff3e0;
             color: #fb8c00;
         }
+        .return-verification-badge.analyzing {
+            background: #e3f2fd;
+            color: #1976d2;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
         .return-verification-badge.not-returned {
             background: #f3e5f5;
             color: #6a1b9a;
@@ -495,7 +504,7 @@ if (!$all_transactions) {
             background: #f57c00;
         }
         .return-review-modal {
-            max-width: 600px;
+            max-width: 850px;
             max-height: 80vh;
             overflow-y: auto;
         }
@@ -841,9 +850,68 @@ if (!$all_transactions) {
                         </thead>
                         <tbody>
                             <?php 
-                            // Reset pointer to beginning
+                            // Build a de-duplicated set of transactions to avoid duplicate rows with same return date
                             $all_transactions->data_seek(0);
-                            while($row = $all_transactions->fetch_assoc()): 
+                            $__rawRows = [];
+                            while ($__tmp = $all_transactions->fetch_assoc()) {
+                                $__rawRows[] = $__tmp;
+                            }
+
+                            // Group key: user + equipment + actual_return_date (fallback to txn_datetime)
+                            $__byKey = [];
+                            foreach ($__rawRows as $__r) {
+                                $u = $__r['user_id'] ?? '';
+                                $eq = $__r['equipment_id'] ?? '';
+                                $ret = $__r['actual_return_date'] ?? '';
+                                if ($ret === '' || $ret === '0000-00-00 00:00:00') {
+                                    $ret = $__r['txn_datetime'] ?? ($__r['transaction_date'] ?? '');
+                                }
+                                $k = $u . '|' . $eq . '|' . $ret;
+
+                                if (!isset($__byKey[$k])) {
+                                    $__byKey[$k] = $__r;
+                                    continue;
+                                }
+
+                                $existing = $__byKey[$k];
+                                $existingHasApproval = !empty($existing['approved_by']) && !empty($existing['approved_at']);
+                                $currentHasApproval = !empty($__r['approved_by']) && !empty($__r['approved_at']);
+
+                                // Prefer row with approval meta; else prefer the one with return photos
+                                if ($currentHasApproval && !$existingHasApproval) {
+                                    $__byKey[$k] = $__r;
+                                    continue;
+                                }
+
+                                // Compare presence of return photos if available
+                                $existingHasReturnPhotos = false;
+                                $currentHasReturnPhotos = false;
+                                if (isset($transactionPhotos)) {
+                                    $existingId = $existing['id'] ?? null;
+                                    $currentId = $__r['id'] ?? null;
+                                    if ($existingId && !empty($transactionPhotos[$existingId]['return'] ?? [])) {
+                                        $existingHasReturnPhotos = true;
+                                    }
+                                    if ($currentId && !empty($transactionPhotos[$currentId]['return'] ?? [])) {
+                                        $currentHasReturnPhotos = true;
+                                    }
+                                }
+                                if ($currentHasReturnPhotos && !$existingHasReturnPhotos) {
+                                    $__byKey[$k] = $__r;
+                                    continue;
+                                }
+                                // Otherwise keep existing
+                            }
+
+                            // Sort by transaction date desc to match previous ordering
+                            $filteredTransactions = array_values($__byKey);
+                            usort($filteredTransactions, function($a, $b) {
+                                $ad = $a['transaction_date'] ?? $a['created_at'] ?? '';
+                                $bd = $b['transaction_date'] ?? $b['created_at'] ?? '';
+                                return strcmp($bd, $ad);
+                            });
+
+                            foreach ($filteredTransactions as $row): 
                                 // Determine status based on transaction_type and status
                                 $status = 'borrowed';
                                 $rowStatus = $row['status'] ?? 'Active';
@@ -903,6 +971,7 @@ if (!$all_transactions) {
                                 $verificationClassMap = [
             'Not Yet Returned' => 'not-returned',
             'Pending' => 'pending',
+            'Analyzing' => 'analyzing',
             'Verified' => 'verified',
             'Flagged' => 'flagged',
             'Rejected' => 'rejected'
@@ -933,6 +1002,8 @@ if (!$all_transactions) {
             'equipmentName' => $row['equipment_name'] ?? null,
             'status' => $row['status'] ?? null,
             'detectedIssues' => $row['detected_issues'] ?? null,
+            'severityLevel' => $row['severity_level'] ?? 'none',
+            'comparisonMethod' => 'hybrid',
             'borrowPhotos' => $borrowPhotos,
                                     'returnPhotos' => $returnPhotos,
                                     'detections' => $damageDetections,
@@ -1017,7 +1088,7 @@ if (!$all_transactions) {
                                     <?php endif; ?>
                                 </td>
                             </tr>
-                            <?php endwhile; ?>
+                            <?php endforeach; ?>
                         </tbody>
                     </table>
                     <?php else: ?>
@@ -1172,9 +1243,11 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         function applyVerificationBadgeClass(target, status) {
             if (!target) return;
             const normalized = (status || 'Pending').toLowerCase();
-            target.classList.remove('pending', 'verified', 'flagged', 'rejected', 'not-returned');
+            target.classList.remove('pending', 'analyzing', 'verified', 'flagged', 'rejected', 'not-returned');
             if (normalized === 'not yet returned') {
                 target.classList.add('not-returned');
+            } else if (normalized === 'analyzing') {
+                target.classList.add('analyzing');
             } else if (normalized === 'verified') {
                 target.classList.add('verified');
             } else if (normalized === 'flagged') {
@@ -1280,7 +1353,15 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 }
             }
 
+            // Display system auto-detected issues
             detectedIssuesDisplay.textContent = hasText ? text : 'No issues detected';
+            
+            // Show comparison method if available
+            if (activeReturnReview && activeReturnReview.comparisonMethod) {
+                const methodText = ` (Method: ${activeReturnReview.comparisonMethod})`;
+                detectedIssuesDisplay.textContent += methodText;
+            }
+            
             detectedIssuesDisplay.style.display = 'block';
         }
 
@@ -1334,6 +1415,10 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             setReturnReviewPhoto('reference', info.referencePhotos || []);
             setReturnReviewPhoto('return', info.returnPhotos || []);
             setReturnReviewDetections(info.detections || [], info.similarityScore);
+            
+            // Enhanced auto-detection display
+            applyDetectedIssuesUI(info.detectedIssues);
+            
             resetReturnReviewNotes();
             if (returnReviewModal) {
                 returnReviewModal.classList.add('show');
@@ -1489,17 +1574,33 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         document.addEventListener('click', (event) => {
             const reviewTrigger = event.target.closest('[data-return-review]');
             if (reviewTrigger) {
-                const row = reviewTrigger.closest('tr');
-                if (!row) {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                // Check if button is disabled
+                if (reviewTrigger.disabled) {
+                    console.log('Review button is disabled');
                     return;
                 }
+                
+                const row = reviewTrigger.closest('tr');
+                if (!row) {
+                    console.log('No row found');
+                    return;
+                }
+                
+                console.log('Row dataset:', row.dataset);
+                
                 let parsed = null;
                 try {
                     parsed = JSON.parse(row.dataset.returnInfo || '{}');
+                    console.log('Parsed returnInfo:', parsed);
                 } catch (err) {
+                    console.error('Failed to parse returnInfo:', err);
                     parsed = null;
                 }
                 if (!parsed || !parsed.transactionId) {
+                    console.log('No transactionId found in returnInfo');
                     return;
                 }
                 parsed.rowId = row.id;
@@ -1849,6 +1950,90 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             console.log(`Showing ${visibleRows.length} of ${totalRows} transactions`);
         }
         
+        // Poll for analyzing transactions
+        const analyzingTransactions = new Set();
+        
+        function startPollingForAnalyzing() {
+            const rows = document.querySelectorAll('#transactionsTable tbody tr');
+            rows.forEach(row => {
+                const badge = row.querySelector('[data-return-verification-badge]');
+                if (badge && badge.textContent.toLowerCase() === 'analyzing') {
+                    const txnId = row.id.replace('txn-', '');
+                    if (txnId && !analyzingTransactions.has(txnId)) {
+                        analyzingTransactions.add(txnId);
+                        pollComparisonStatus(txnId, row);
+                    }
+                }
+            });
+        }
+        
+        async function pollComparisonStatus(transactionId, row) {
+            let attempts = 0;
+            const maxAttempts = 40; // 40 attempts * 3 seconds = 2 minutes max
+            
+            const poll = async () => {
+                if (attempts >= maxAttempts) {
+                    analyzingTransactions.delete(transactionId);
+                    return;
+                }
+                
+                attempts++;
+                
+                try {
+                    const response = await fetch(`get_comparison_status.php?transaction_id=${transactionId}`);
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        console.error('Polling error:', data.error);
+                        analyzingTransactions.delete(transactionId);
+                        return;
+                    }
+                    
+                    if (!data.is_analyzing) {
+                        // Update row with final results
+                        updateRowWithComparisonResults(row, data);
+                        analyzingTransactions.delete(transactionId);
+                        return;
+                    }
+                    
+                    // Continue polling
+                    setTimeout(poll, 3000);
+                } catch (err) {
+                    console.error('Polling failed:', err);
+                    analyzingTransactions.delete(transactionId);
+                }
+            };
+            
+            poll();
+        }
+        
+        function updateRowWithComparisonResults(row, data) {
+            const badge = row.querySelector('[data-return-verification-badge]');
+            const scoreEl = row.querySelector('[data-return-verification-score]');
+            
+            if (badge) {
+                applyVerificationBadgeClass(badge, data.return_verification_status);
+            }
+            
+            if (scoreEl && data.similarity_score !== null) {
+                scoreEl.textContent = 'Score: ' + Number(data.similarity_score).toFixed(2) + '%';
+                scoreEl.style.display = 'inline-block';
+            }
+            
+            // Update return info data attribute
+            try {
+                const existingInfo = JSON.parse(row.dataset.returnInfo || '{}');
+                existingInfo.verificationStatus = data.return_verification_status;
+                existingInfo.reviewStatus = data.return_review_status;
+                existingInfo.similarityScore = data.similarity_score;
+                existingInfo.detectedIssues = data.detected_issues;
+                existingInfo.severityLevel = data.severity_level;
+                row.dataset.returnInfo = JSON.stringify(existingInfo);
+            } catch (err) {
+                console.error('Failed to update return info:', err);
+            }
+        }
+        
         // Sidebar toggle functionality
         document.addEventListener('DOMContentLoaded', function() {
             const sidebarToggle = document.getElementById('sidebarToggle');
@@ -1861,6 +2046,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                     adminContainer.classList.toggle('sidebar-hidden', isHidden);
                 });
             }
+            
+            // Start polling for analyzing transactions
+            startPollingForAnalyzing();
         });
     </script>
 </body>

@@ -68,6 +68,48 @@ try {
         throw new Exception('Only borrow transactions can be reviewed.');
     }
 
+    // Enhanced Image Comparison - Auto-detect issues
+    $detectedIssuesText = 'No visible damage detected.';
+    $similarityScore = 0;
+    $severityLevel = 'none';
+    $comparisonResults = null;
+
+    // Get transaction photos for comparison
+    $photosStmt = $conn->prepare("SELECT photo_path, photo_type FROM transaction_photos WHERE transaction_id = ? ORDER BY created_at ASC");
+    if ($photosStmt) {
+        $photosStmt->bind_param('i', $transactionId);
+        $photosStmt->execute();
+        $photosResult = $photosStmt->get_result();
+        $photos = $photosResult->fetch_all(MYSQLI_ASSOC);
+        $photosStmt->close();
+
+        // Find reference and return photos
+        $referencePhoto = null;
+        $returnPhoto = null;
+        
+        foreach ($photos as $photo) {
+            if ($photo['photo_type'] === 'borrow' && $referencePhoto === null) {
+                $referencePhoto = $photo['photo_path'];
+            } elseif ($photo['photo_type'] === 'return' && $returnPhoto === null) {
+                $returnPhoto = $photo['photo_path'];
+            }
+        }
+
+        // Perform image comparison if both photos exist
+        if ($referencePhoto && $returnPhoto) {
+            // Include the enhanced image comparison functions
+            require_once '../includes/image_comparison.php';
+            
+            $comparisonResults = analyzeImageDifferences($referencePhoto, $returnPhoto, 4, $transaction['item_size'] ?? 'medium');
+            
+            if ($comparisonResults && isset($comparisonResults['detected_issues_text'])) {
+                $detectedIssuesText = $comparisonResults['detected_issues_text'];
+                $similarityScore = $comparisonResults['similarity'] ?? 0;
+                $severityLevel = $comparisonResults['severity_level'] ?? 'none';
+            }
+        }
+    }
+
     $currentVerification = $transaction['return_verification_status'] ?? 'Pending';
     $currentReviewStatus = $transaction['return_review_status'] ?? 'Pending';
     $currentStatus = $transaction['status'] ?? 'Active';
@@ -120,11 +162,11 @@ try {
         $newNotes = $newNotes === '' ? $noteFragment : $newNotes . ' | ' . $noteFragment;
     }
 
-    $update = $conn->prepare("UPDATE transactions SET status = ?, return_verification_status = ?, return_review_status = ?, processed_by = ?, notes = ?, detected_issues = ?, updated_at = NOW() WHERE id = ?");
+    $update = $conn->prepare("UPDATE transactions SET status = ?, return_verification_status = ?, return_review_status = ?, processed_by = ?, notes = ?, detected_issues = ?, similarity_score = ?, updated_at = NOW() WHERE id = ?");
     if (!$update) {
         throw new Exception('Failed to prepare update statement.');
     }
-    $update->bind_param('sssissi', $newTransactionStatus, $newVerification, $newReviewStatus, $adminId, $newNotes, $detectedIssues, $transactionId);
+    $update->bind_param('sssissdi', $newTransactionStatus, $newVerification, $newReviewStatus, $adminId, $newNotes, $detectedIssuesText, $similarityScore, $transactionId);
     if (!$update->execute() || $update->affected_rows !== 1) {
         throw new Exception('Failed to update transaction.');
     }
@@ -140,15 +182,18 @@ try {
             'status' => $newTransactionStatus,
             'return_verification_status' => $newVerification,
             'return_review_status' => $newReviewStatus,
-            'similarity_score' => $transaction['similarity_score'],
-            'detected_issues' => $detectedIssues,
+            'similarity_score' => $similarityScore,
+            'detected_issues' => $detectedIssuesText,
+            'severity_level' => $severityLevel,
+            'comparison_method' => $comparisonResults['method_used'] ?? 'hybrid',
         ],
         'display' => [
             'status' => $newTransactionStatus,
             'verification_status' => $newVerification,
             'review_status' => $newReviewStatus,
-            'similarity_score' => $transaction['similarity_score'],
-            'detected_issues' => $detectedIssues,
+            'similarity_score' => $similarityScore,
+            'detected_issues' => $detectedIssuesText,
+            'severity_level' => $severityLevel,
         ],
     ]);
     exit;

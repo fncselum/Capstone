@@ -44,7 +44,7 @@ if ($db_connected) {
 				$stmt = $conn->prepare("SELECT t.*, e.name as equipment_name, e.quantity as current_qty,
 				i.available_quantity, i.minimum_stock_level,
 				i.borrowed_quantity, i.damaged_quantity, i.equipment_id AS inventory_equipment_id,
-				e.rfid_tag
+				e.rfid_tag, e.image_path, i.item_size
 				FROM transactions t 
 				JOIN equipment e ON t.equipment_id = e.rfid_tag 
 				LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id
@@ -152,16 +152,24 @@ if ($db_connected) {
 						}
 					}
 
+					$sizeCategory = strtolower($transaction['item_size'] ?? 'medium');
 					$comparisonPhotoPath = null;
 					$similarityScore = null;
 					$verificationStatus = 'Pending';
 					$reviewStatus = 'Pending';
+					$detectedIssuesText = 'Pending comparison';
+					$severityLevel = 'pending';
+					$comparisonQueued = false;
+					$shouldRunComparison = false;
+					$referenceFullPath = null;
+					$comparisonDir = null;
 					$comparisonResults = [];
+					$comparisonWarnings = [];
+
+					$rootPath = realpath(__DIR__ . '/../');
 
 					if (!empty($returnPhotoPath) && $returnPhotoAbsolute && file_exists($returnPhotoAbsolute)) {
 						$referenceBase = null;
-
-						$sizeCategory = strtolower($transaction['item_size'] ?? 'medium');
 
 						if ($sizeCategory === 'large') {
 							$borrowPhotoStmt = $conn->prepare("SELECT file_path FROM transaction_photos WHERE transaction_id = ? AND photo_type = 'borrow' ORDER BY id ASC LIMIT 1");
@@ -175,14 +183,10 @@ if ($db_connected) {
 								}
 								$borrowPhotoStmt->close();
 							}
-						} else {
-							if (!empty($transaction['image_path'])) {
-								$referenceBase = $transaction['image_path'];
-							}
+						} elseif (!empty($transaction['image_path'])) {
+							$referenceBase = $transaction['image_path'];
 						}
 
-						$rootPath = realpath(__DIR__ . '/../');
-						$referenceFullPath = null;
 						if (!empty($referenceBase)) {
 							$candidatePaths = [];
 							$candidatePaths[] = $rootPath . DIRECTORY_SEPARATOR . ltrim($referenceBase, '/\\');
@@ -193,6 +197,10 @@ if ($db_connected) {
 							$realReference = realpath($referenceBase);
 							if ($realReference !== false) {
 								$candidatePaths[] = $realReference;
+							}
+							// Also try absolute path from database if it starts with uploads/
+							if (strpos($referenceBase, 'uploads/') === 0) {
+								$candidatePaths[] = $rootPath . DIRECTORY_SEPARATOR . $referenceBase;
 							}
 							foreach ($candidatePaths as $pathCandidate) {
 								if ($pathCandidate && file_exists($pathCandidate)) {
@@ -209,78 +217,34 @@ if ($db_connected) {
 									throw new Exception('Failed to create comparison directory.');
 								}
 							}
-                            
-                            // Include the image comparison library
-                            require_once __DIR__ . '/../includes/image_comparison.php';
-                            
-                            // Skip comparison for large items (manual review only)
-                            if ($sizeCategory !== 'large') {
-                                // Perform image comparison
-                                if (function_exists('analyzeImageDifferences')) {
-                                    $comparisonResults = analyzeImageDifferences($referenceFullPath, $returnPhotoAbsolute, 4, $sizeCategory);
-                                    $similarityScore = $comparisonResults['similarity'] ?? null;
-                                    $detectedIssuesText = $comparisonResults['detected_issues_text'] ?? 'No issues detected';
-                                    $severityLevel = $comparisonResults['severity_level'] ?? 'none';
-                                    
-                                    // Store comparison results in transaction_meta
-                                    if (!empty($comparisonResults)) {
-                                        $metaStmt = $conn->prepare("
-                                            INSERT INTO transaction_meta (transaction_id, meta_key, meta_value, created_at)
-                                            VALUES (?, 'image_comparison', ?, NOW())
-                                            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = NOW()
-                                        ");
-                                        $metaJson = json_encode($comparisonResults);
-                                        $metaStmt->bind_param('is', $transaction_id, $metaJson);
-                                        $metaStmt->execute();
-                                        $metaStmt->close();
-                                        
-                                        // Handle verification based on item size and similarity score
-                                        if ($sizeCategory === 'small' && $similarityScore >= 90) {
-                                            // Auto-verify small items with high similarity
-                                            $verificationStatus = 'Verified';
-                                            $reviewStatus = 'Verified';
-                                            $finalStatus = 'Returned';
-                                            $notes .= "\n[System] Auto-verified return (Similarity: " . round($similarityScore, 2) . "%)";
-                                        } elseif ($sizeCategory === 'medium' && $similarityScore >= 87) {
-                                            // Flag for admin review for medium items
-                                            $verificationStatus = 'Pending';
-                                            $reviewStatus = 'Pending Review';
-                                            $notes .= "\n[System] Pending admin review (Similarity: " . round($similarityScore, 2) . "%)";
-                                        } else {
-                                            // Flag for review if similarity is below threshold
-                                            $verificationStatus = 'Pending';
-                                            $reviewStatus = 'Review Required';
-                                            $notes .= "\n[System] Review required (Similarity: " . round($similarityScore, 2) . "%)";
-                                        }
-                                        
-                                        // Generate comparison preview
-                                        $comparisonFile = $comparisonDir . 'comparison_' . time() . '_' . $transaction_id . '.jpg';
-                                        if (generateComparisonPreview($referenceFullPath, $returnPhotoAbsolute, $comparisonFile)) {
-                                            $comparisonPhotoPath = 'uploads/transaction_photos/' . basename($comparisonFile);
-                                            $comparisonStmt = $conn->prepare("
-                                                INSERT INTO transaction_photos (transaction_id, photo_type, file_path, created_at) 
-                                                VALUES (?, 'comparison', ?, NOW())
-                                                ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), updated_at = NOW()
-                                            
-                                            ");
-                                            if ($comparisonStmt) {
-                                                $comparisonStmt->bind_param('is', $transaction_id, $comparisonPhotoPath);
-                                                $comparisonStmt->execute();
-                                                $comparisonStmt->close();
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                // For large items, set to manual review
-                                $verificationStatus = 'Pending';
-                                $reviewStatus = 'Manual Review Required';
-                                $notes .= "\n[System] Large item - Manual review required";
-                            }
 						}
+
+						if ($sizeCategory === 'large') {
+							$verificationStatus = 'Pending';
+							$reviewStatus = 'Manual Review Required';
+							$detectedIssuesText = 'Manual review required (large item).';
+							$severityLevel = 'medium';
+						} elseif ($referenceFullPath) {
+							$comparisonQueued = true;
+							$shouldRunComparison = true;
+							$verificationStatus = 'Analyzing';
+							$reviewStatus = 'Pending Review';
+							$detectedIssuesText = 'Analyzing comparison…';
+							$severityLevel = 'pending';
+						} else {
+							$verificationStatus = 'Pending';
+							$reviewStatus = 'Review Required';
+							$detectedIssuesText = 'Reference photo unavailable – manual review required.';
+							$severityLevel = 'high';
+						}
+					} else {
+						$verificationStatus = 'Pending';
+						$reviewStatus = 'Review Required';
+						$detectedIssuesText = 'Return photo missing – manual review required.';
+						$severityLevel = 'high';
 					}
 
-					// Update transaction with verification and review status
+					// Update transaction with initial analyzing/queue status
 					$finalStatus = 'Returned';
 					$actual_return_date = date('Y-m-d H:i:s');
 					$existingNotes = $transaction['notes'] ?? '';
@@ -288,8 +252,11 @@ if ($db_connected) {
 						$existingNotes = '';
 					}
 					$notes = $existingNotes . "\n[System] Return processed at " . $actual_return_date;
+					if ($comparisonQueued) {
+						$notes .= "\n[System] Comparison queued (awaiting analysis results)";
+					}
 
-					$updateStatus = $conn->prepare("UPDATE transactions SET 
+					$initialUpdate = $conn->prepare("UPDATE transactions SET 
 						transaction_type = 'Return',
 						status = 'Returned',
 						actual_return_date = ?,
@@ -300,65 +267,193 @@ if ($db_connected) {
 						return_review_status = ?,
 						similarity_score = ?,
 						detected_issues = ?,
+						severity_level = ?,
 						updated_at = NOW()
-					WHERE id = ?") or die($conn->error);
-					
-					if ($updateStatus) {
-						$updateStatus->bind_param('ssssssdsi', 
-							$actual_return_date,
-							$condition_after,
-							$penalty,
-							$notes,
-							$verificationStatus,
-							$reviewStatus,
-							$similarityScore,
-							$detectedIssuesText,
-							$transaction_id
-						);
-						if (!$updateStatus->execute()) {
-							throw new Exception("Failed to update transaction status: " . $updateStatus->error);
-						}
-						$updateStatus->close();
-					} else {
+					WHERE id = ?");
+					if (!$initialUpdate) {
 						throw new Exception("Failed to prepare status update query");
 					}
+					$initialUpdate->bind_param(
+						'ssisssdssi',
+						$actual_return_date,
+						$condition_after,
+						$penalty,
+						$notes,
+						$verificationStatus,
+						$reviewStatus,
+						$similarityScore,
+						$detectedIssuesText,
+						$severityLevel,
+						$transaction_id
+					);
+					if (!$initialUpdate->execute()) {
+						throw new Exception("Failed to update transaction status: " . $initialUpdate->error);
+					}
+					$initialUpdate->close();
 
-					// Create a new return transaction record
-					$returnStmt = $conn->prepare("INSERT INTO transactions (
-						user_id, equipment_id, item_size, transaction_type, quantity,
-						transaction_date, expected_return_date, actual_return_date,
-						condition_before, condition_after, status, approval_status,
-						penalty_applied, notes, return_verification_status,
-						created_at, updated_at
-					) VALUES (
-						?, ?, ?, 'Return', ?,
-						NOW(), ?, ?,
-						?, ?, 'Returned', 'Approved',
-						?, ?, ?,
-						NOW(), NOW()
-					)");
+					// Perform comparison and finalize results if queued
+					if ($shouldRunComparison && $referenceFullPath) {
+						require_once __DIR__ . '/../includes/image_comparison.php';
 
-					if ($returnStmt) {
-						$returnStmt->bind_param('iississssss',
-							$user_id,
-							$equipment_id,
-							$transaction['item_size'],
-							$transaction['quantity'],
-							$transaction['expected_return_date'],
-							$actual_return_date,
-							$transaction['condition_before'],
-							$condition_after,
-							$penalty,
-							$notes,
-							$verificationStatus
-						);
+						$comparisonResults = compareReturnToReference($referenceFullPath, $returnPhotoAbsolute, [
+							'item_size' => $sizeCategory,
+						]);
 
-						if (!$returnStmt->execute()) {
-							throw new Exception("Failed to create return transaction: " . $returnStmt->error);
+						if (!empty($comparisonResults['warnings'])) {
+							$comparisonWarnings = $comparisonResults['warnings'];
 						}
-						$returnStmt->close();
+
+						$metaPayload = [
+							'version' => '2.1',
+							'results' => $comparisonResults,
+						];
+						$metaStmt = $conn->prepare("INSERT INTO transaction_meta (transaction_id, meta_key, meta_value, created_at)
+							VALUES (?, 'image_comparison', ?, NOW())
+							ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = NOW()");
+						if ($metaStmt) {
+							$metaJson = json_encode($metaPayload);
+							$metaStmt->bind_param('is', $transaction_id, $metaJson);
+							$metaStmt->execute();
+							$metaStmt->close();
+						}
+
+						if (!empty($comparisonResults['success'])) {
+							$similarityScore = $comparisonResults['similarity'] ?? null;
+							$ssimScore = $comparisonResults['ssim_score'] ?? null;
+							$phashScore = $comparisonResults['phash_score'] ?? null;
+							$pixelScore = $comparisonResults['pixel_difference_score'] ?? null;
+							$confidenceBand = $comparisonResults['confidence_band'] ?? 'low';
+							$severityLevel = $comparisonResults['severity_level'] ?? 'medium';
+							$detectedIssuesList = $comparisonResults['detected_issues_list'] ?? [];
+
+							$formatIssue = static function ($message) {
+								$trimmed = trim((string)$message);
+								if ($trimmed === '') {
+									return $trimmed;
+								}
+								$normalized = ucfirst($trimmed);
+								if (substr($normalized, -1) !== '.') {
+									$normalized .= '.';
+								}
+								return $normalized;
+							};
+
+							if (empty($detectedIssuesList)) {
+								$detectedIssuesList = [$comparisonResults['detected_issues_text'] ?? 'Differences detected'];
+							}
+
+							$detectedIssuesList = array_map($formatIssue, $detectedIssuesList);
+							$detectedIssuesText = implode("\n", $detectedIssuesList);
+
+							if ($similarityScore !== null) {
+								$numericScore = (float)$similarityScore;
+
+								if ($numericScore >= 70.0) {
+									$verificationStatus = 'Verified';
+									$reviewStatus = ($sizeCategory === 'small') ? 'Verified' : 'Pending Review';
+									$severityLevel = 'none';
+									$detectedIssuesList[0] = $formatIssue('Item returned successfully – no damages detected.');
+								} elseif ($numericScore >= 50.0) {
+									$verificationStatus = 'Pending';
+									$reviewStatus = 'Pending Review';
+									$detectedIssuesList[0] = $formatIssue('Minor visual difference detected – verify manually.');
+									if ($severityLevel === 'none') {
+										$severityLevel = 'medium';
+									}
+								} else {
+									$verificationStatus = 'Flagged';
+									$reviewStatus = 'Review Required';
+									$severityLevel = 'high';
+									$detectedIssuesList[0] = $formatIssue('Item mismatch detected – please check return.');
+								}
+							}
+
+							$detectedIssuesText = implode("\n", $detectedIssuesList);
+
+							$finalNote = "\n[System] Comparison complete: " . round((float)$similarityScore, 2) . "% similarity";
+							if ($ssimScore !== null && $phashScore !== null) {
+								$finalNote .= " (SSIM " . round((float)$ssimScore, 2) . "%, pHash " . round((float)$phashScore, 2) . "%)";
+							}
+							if ($pixelScore !== null) {
+								$finalNote .= ", Pixel " . round((float)$pixelScore, 2) . "%";
+							}
+							$finalNote .= " – Confidence: " . ucfirst($confidenceBand);
+
+							if (!empty($detectedIssuesList)) {
+								$finalNote .= "\n[System] Detected issues: " . implode(' | ', array_map(static function ($msg) {
+									return trim($msg);
+								}, $detectedIssuesList));
+							}
+
+							if (!empty($comparisonWarnings)) {
+								$finalNote .= "\n[System] Comparison warnings: " . implode('; ', $comparisonWarnings);
+							}
+
+							$finalNotesUpdate = $conn->prepare("UPDATE transactions SET 
+								return_verification_status = ?,
+								return_review_status = ?,
+								similarity_score = ?,
+								detected_issues = ?,
+								severity_level = ?,
+								notes = CONCAT(IFNULL(notes, ''), ?),
+								updated_at = NOW()
+							WHERE id = ?");
+							if ($finalNotesUpdate) {
+								$finalNotesUpdate->bind_param(
+									'ssdsssi',
+									$verificationStatus,
+									$reviewStatus,
+									$similarityScore,
+									$detectedIssuesText,
+									$severityLevel,
+									$finalNote,
+									$transaction_id
+								);
+								$finalNotesUpdate->execute();
+								$finalNotesUpdate->close();
+							}
+
+							if (function_exists('generateComparisonPreview') && $comparisonDir) {
+								$comparisonFile = $comparisonDir . 'comparison_' . time() . '_' . $transaction_id . '.jpg';
+								if (generateComparisonPreview($referenceFullPath, $returnPhotoAbsolute, $comparisonFile)) {
+									$comparisonPhotoPath = 'uploads/transaction_photos/' . basename($comparisonFile);
+									$comparisonStmt = $conn->prepare("INSERT INTO transaction_photos (transaction_id, photo_type, file_path, created_at)
+										VALUES (?, 'comparison', ?, NOW())
+										ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), updated_at = NOW()");
+									if ($comparisonStmt) {
+										$comparisonStmt->bind_param('is', $transaction_id, $comparisonPhotoPath);
+										$comparisonStmt->execute();
+										$comparisonStmt->close();
+									}
+								}
+							}
+						} else {
+							$severityLevel = 'high';
+							$verificationStatus = 'Pending';
+							$reviewStatus = 'Review Required';
+							$detectedIssuesText = $comparisonResults['summary'] ?? 'Comparison failed (invalid image data)';
+							$failureNote = "\n[System] Comparison failed: " . ($comparisonResults['summary'] ?? 'Invalid image data');
+							if (!empty($comparisonWarnings)) {
+								$failureNote .= "\n[System] Comparison warnings: " . implode('; ', $comparisonWarnings);
+							}
+							$failureUpdate = $conn->prepare("UPDATE transactions SET 
+								return_verification_status = ?,
+								return_review_status = ?,
+								similarity_score = NULL,
+								detected_issues = ?,
+								severity_level = ?,
+								notes = CONCAT(IFNULL(notes, ''), ?),
+								updated_at = NOW()
+							WHERE id = ?");
+							if ($failureUpdate) {
+								$failureUpdate->bind_param('sssisi', $verificationStatus, $reviewStatus, $detectedIssuesText, $severityLevel, $failureNote, $transaction_id);
+								$failureUpdate->execute();
+								$failureUpdate->close();
+							}
+						}
 					}
 
+					// Transaction finalized - commit changes
 					$conn->commit();
 					
 					// Success message
