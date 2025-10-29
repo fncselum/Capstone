@@ -233,10 +233,13 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
     body:not(.sidebar-hidden) .main-content {
         margin-left: 260px;
+        max-width: calc(100% - 260px);
     }
 
     body.sidebar-hidden .main-content {
-        margin-left: 0;
+        margin-left: auto;
+        margin-right: auto;
+        max-width: 1400px;
     }
 
     .sidebar-header {

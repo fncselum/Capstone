@@ -195,7 +195,7 @@ if ($id > 0) {
     
     <div class="header">
         <h1>Penalty Guideline</h1>
-        <p class="subtitle">De La Salle Araneta - Equipment Management System</p>
+        <p class="subtitle">De La Salle Andres Soriano Memorial College (ASMC) - Equipment Management System</p>
     </div>
     
     <div class="content">

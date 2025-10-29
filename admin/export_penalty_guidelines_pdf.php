@@ -232,7 +232,7 @@ $guidelines = $conn->query($sql);
     
     <div class="header">
         <h1>Penalty Guidelines Report</h1>
-        <p class="subtitle">De La Salle Araneta - Equipment Management System</p>
+        <p class="subtitle">De La Salle Andres Soriano Memorial College (ASMC) - Equipment Management System</p>
     </div>
     
     <?php if ($filter_type !== 'all' || $filter_status !== 'all' || !empty($search_query)): ?>

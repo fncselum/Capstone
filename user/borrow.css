@@ -6,6 +6,7 @@ body {
 	align-items: unset !important;
 	overflow-y: auto !important;
 	min-height: 100vh;
+	scroll-behavior: smooth;
 }
 
 .container {
@@ -26,11 +27,19 @@ body {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	margin-bottom: 30px;
+	margin-bottom: 20px;
 	padding: 20px;
 	background: white;
 	border-radius: 15px;
 	box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+	position: sticky;
+	top: 0;
+	z-index: 100;
+	transition: box-shadow 0.3s ease;
+}
+
+.borrow-header.scrolled {
+	box-shadow: 0 4px 20px rgba(0,0,0,0.1);
 }
 
 .header-left {
@@ -327,6 +336,14 @@ body {
 	flex-wrap: wrap;
 	justify-content: flex-start;
 	align-items: center;
+	position: sticky;
+	top: 100px;
+	z-index: 99;
+	transition: box-shadow 0.3s ease;
+}
+
+.category-filter-bar.scrolled {
+	box-shadow: 0 4px 20px rgba(0,0,0,0.1);
 }
 
 .filter-btn {
