@@ -617,6 +617,111 @@
     font-size: 1.2rem;
 }
 
+/* Penalty Button */
+.btn-penalty {
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-penalty:hover {
+    background: linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(156, 39, 176, 0.3);
+}
+
+/* Penalty Confirmation Modal */
+.penalty-header {
+    background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%);
+    color: white !important;
+}
+
+.penalty-header h2 {
+    color: white !important;
+}
+
+.penalty-header .modal-close {
+    color: white;
+}
+
+.penalty-details {
+    margin-top: 20px;
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #666;
+}
+
+.detail-value {
+    font-weight: 500;
+    color: #333;
+}
+
+.severity-severe,
+.severity-high {
+    color: #c62828;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.severity-moderate,
+.severity-medium {
+    color: #f57c00;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.severity-minor,
+.severity-low,
+.severity-none {
+    color: #2e7d32;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.btn-proceed {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #5e35b1 0%, #4527a0 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-proceed:hover {
+    background: linear-gradient(135deg, #4527a0 0%, #311b92 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(94, 53, 177, 0.3);
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .stats-grid {

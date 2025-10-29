@@ -254,6 +254,9 @@ function displayVerificationForm(transaction) {
             
             <div class="modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeVerifyModal()">Cancel</button>
+                <button type="button" class="btn-penalty" onclick="openPenaltyConfirmation(${transaction.id})">
+                    <i class="fas fa-gavel"></i> Add to Penalty
+                </button>
                 <button type="submit" class="btn-submit btn-verify-submit">
                     <i class="fas fa-check-circle"></i> Verify Return
                 </button>
@@ -413,6 +416,119 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+// ==================== PENALTY CONFIRMATION ====================
+
+/**
+ * Open penalty confirmation modal
+ */
+async function openPenaltyConfirmation(transactionId) {
+    try {
+        const response = await fetch(`api/return_verification_handler.php?action=get_transaction&id=${transactionId}`);
+        const text = await response.text();
+        
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            console.error('Invalid JSON response:', text);
+            throw new Error('Server returned invalid response');
+        }
+        
+        if (data.success) {
+            showPenaltyConfirmation(data.data);
+        } else {
+            showAlert(data.message || 'Failed to load transaction', 'error');
+        }
+    } catch (error) {
+        console.error('Error loading transaction:', error);
+        showAlert('Error: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Show penalty confirmation modal
+ */
+function showPenaltyConfirmation(transaction) {
+    // Get similarity score and severity from AI comparison if available
+    let similarityScore = 'N/A';
+    let severityLevel = 'MODERATE';
+    
+    // Check if there's AI comparison data
+    if (transaction.ai_similarity_score !== null && transaction.ai_similarity_score !== undefined) {
+        similarityScore = parseFloat(transaction.ai_similarity_score).toFixed(2) + '%';
+    }
+    
+    if (transaction.ai_severity_level) {
+        severityLevel = transaction.ai_severity_level.toUpperCase();
+    }
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.id = 'penaltyConfirmModal';
+    modal.innerHTML = `
+        <div class="modal-content modal-medium">
+            <div class="modal-header penalty-header">
+                <h2><i class="fas fa-gavel"></i> Create Penalty Record</h2>
+                <button class="modal-close" onclick="closePenaltyConfirmation()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <strong>You are about to create a penalty record for this transaction. Please review the details below.</strong>
+                </div>
+                
+                <div class="penalty-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Equipment:</span>
+                        <span class="detail-value">${escapeHtml(transaction.equipment_name)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Transaction ID:</span>
+                        <span class="detail-value">#${escapeHtml(transaction.id)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Student ID:</span>
+                        <span class="detail-value">${escapeHtml(transaction.student_id)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Similarity Score:</span>
+                        <span class="detail-value">${similarityScore}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Severity Level:</span>
+                        <span class="detail-value severity-${severityLevel.toLowerCase()}">${severityLevel}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closePenaltyConfirmation()">Cancel</button>
+                <button type="button" class="btn-proceed" onclick="proceedToPenaltyManagement(${transaction.id})">
+                    <i class="fas fa-arrow-right"></i> Proceed to Penalty Management
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+/**
+ * Close penalty confirmation modal
+ */
+function closePenaltyConfirmation() {
+    const modal = document.getElementById('penaltyConfirmModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+/**
+ * Proceed to penalty management with transaction data
+ */
+function proceedToPenaltyManagement(transactionId) {
+    window.location.href = `admin-penalty-management.php?action=create_from_transaction&transaction_id=${transactionId}`;
 }
 
 // Close modals when clicking outside

@@ -59,10 +59,10 @@ $success_message = $_SESSION['success_message'] ?? '';
 $error_message = $_SESSION['error_message'] ?? '';
 unset($_SESSION['success_message'], $_SESSION['error_message']);
 
-// Check if coming from damage penalty workflow
+// Check if coming from damage penalty workflow or return verification
 $damage_penalty_mode = false;
 $damage_penalty_data = [];
-if (isset($_GET['action']) && $_GET['action'] === 'create_damage_penalty') {
+if (isset($_GET['action']) && ($_GET['action'] === 'create_damage_penalty' || $_GET['action'] === 'create_from_transaction')) {
     $damage_penalty_mode = true;
     $damage_penalty_data = [
         'transaction_id' => (int)($_GET['transaction_id'] ?? 0),
@@ -72,15 +72,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'create_damage_penalty') {
         'severity_level' => $_GET['severity_level'] ?? 'medium',
         'student_id' => '',
         'user_rfid' => '',
-        'borrower_reference' => ''
+        'borrower_reference' => '',
+        'from_return_verification' => ($_GET['action'] === 'create_from_transaction')
     ];
     
     // Fetch transaction details
     if ($damage_penalty_data['transaction_id'] > 0) {
-        $txn_query = $conn->prepare("SELECT t.*, u.student_id, u.rfid_tag AS user_rfid, e.name AS equipment_full_name, e.rfid_tag 
+        $txn_query = $conn->prepare("SELECT t.*, u.student_id, u.rfid_tag AS user_rfid, e.name AS equipment_full_name, e.rfid_tag,
+            j.result as ai_result
             FROM transactions t 
             LEFT JOIN users u ON t.user_id = u.id 
             LEFT JOIN equipment e ON t.equipment_id = e.id 
+            LEFT JOIN ai_comparison_jobs j ON t.id = j.transaction_id AND j.status = 'completed'
             WHERE t.id = ?");
 
         if ($txn_query) {
@@ -95,6 +98,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'create_damage_penalty') {
                 $damage_penalty_data['equipment_id'] = $txn_data['equipment_id'];
                 $damage_penalty_data['equipment_full_name'] = $txn_data['equipment_full_name'] ?? $damage_penalty_data['equipment_name'];
                 $damage_penalty_data['return_date'] = $txn_data['actual_return_date'] ?? date('Y-m-d');
+
+                // Extract AI comparison data if coming from return verification
+                if ($damage_penalty_data['from_return_verification'] && !empty($txn_data['ai_result'])) {
+                    $ai_data = json_decode($txn_data['ai_result'], true);
+                    if ($ai_data) {
+                        $damage_penalty_data['similarity_score'] = $ai_data['ai_similarity_score'] ?? $ai_data['final_blended_score'] ?? null;
+                        $damage_penalty_data['severity_level'] = $ai_data['ai_severity_level'] ?? 'medium';
+                        $damage_penalty_data['detected_issues'] = $ai_data['ai_detected_issues'] ?? '';
+                    }
+                }
 
                 $borrower_reference = $damage_penalty_data['student_id'];
                 if ($borrower_reference === '' && !empty($damage_penalty_data['user_rfid'])) {
@@ -213,12 +226,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $penalty_amount = 0;
         $penalty_description = '';
         
+        $guideline_is_active = true;
         if ($guideline_id > 0) {
             $guideline = $penaltySystem->getGuidelineById($guideline_id);
             if ($guideline) {
                 $penalty_type = $guideline['penalty_type'] ?? '';
                 $penalty_amount = (float)($guideline['penalty_amount'] ?? 0);
                 $penalty_description = $guideline['penalty_description'] ?? '';
+            } else {
+                $guideline_is_active = false;
             }
         }
         
@@ -245,7 +261,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             'notes' => trim($_POST['notes'] ?? '')
         ];
 
-        if ($payload['transaction_id'] <= 0 || $payload['penalty_type'] === '' || $payload['equipment_name'] === '') {
+        if (!$guideline_is_active) {
+            $error_message = "Selected guideline is not active. Please pick an active penalty guideline.";
+        } elseif ($payload['transaction_id'] <= 0 || $payload['penalty_type'] === '' || $payload['equipment_name'] === '') {
             $error_message = "Please complete all required fields for creating a penalty.";
         } else {
 
@@ -2138,6 +2156,57 @@ $stats = $penaltySystem->getPenaltyStatistics();
         });
 
         // Sidebar toggle functionality handled by sidebar component
+    </script>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <script>
+        // Toast Notification System
+        const Toast = (() => {
+            const container = document.getElementById('toastContainer');
+            if (!container) return { success: alert, error: alert, info: alert };
+
+            const createToast = (type, message) => {
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.innerHTML = `
+                    <div class="toast-icon">
+                        <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
+                    </div>
+                    <div class="toast-content">
+                        <strong>${type === 'success' ? 'Success' : type === 'error' ? 'Error' : 'Notice'}</strong>
+                        <span>${message}</span>
+                    </div>
+                    <button class="toast-close" aria-label="Close notification">&times;</button>
+                `;
+
+                const close = () => {
+                    toast.classList.add('hide');
+                    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+                };
+
+                toast.querySelector('.toast-close').addEventListener('click', close);
+                container.appendChild(toast);
+
+                requestAnimationFrame(() => toast.classList.add('show'));
+                setTimeout(close, 5000);
+            };
+
+            return {
+                success: msg => createToast('success', msg),
+                error: msg => createToast('error', msg),
+                info: msg => createToast('info', msg)
+            };
+        })();
+
+        // Show toast for PHP messages
+        <?php if (!empty($success_message)): ?>
+            Toast.success(<?= json_encode($success_message) ?>);
+        <?php endif; ?>
+        <?php if (!empty($error_message)): ?>
+            Toast.error(<?= json_encode($error_message) ?>);
+        <?php endif; ?>
     </script>
     </body>
 </html>

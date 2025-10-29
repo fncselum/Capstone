@@ -59,7 +59,9 @@ if ($table_exists) {
         $sql .= " AND pg.penalty_type = '" . $conn->real_escape_string($filter_type) . "'";
     }
 
-    if ($filter_status !== 'all') {
+    if ($filter_status === 'all') {
+        $sql .= " AND pg.status <> 'archived'";
+    } else {
         $sql .= " AND pg.status = '" . $conn->real_escape_string($filter_status) . "'";
     }
 
@@ -204,6 +206,13 @@ if ($table_exists) {
                             <i class="fas fa-file-pdf"></i> Export PDF
                         </button>
                     </div>
+                </div>
+                <div class="status-legend">
+                    <i class="fas fa-info-circle"></i>
+                    <span>
+                        <strong>Draft</strong> guidelines are saved for later and won't appear when issuing penalties. 
+                        <strong>Archived</strong> guidelines stay hidden unless you filter for them.
+                    </span>
                 </div>
 
                 <!-- Guidelines Grid -->
@@ -355,6 +364,7 @@ if ($table_exists) {
                         <option value="active">Active</option>
                         <option value="archived">Archived</option>
                     </select>
+                    <small class="form-hint">Draft keeps the guideline editable and unavailable for issuing. Archived hides it from lists unless filtered.</small>
                 </div>
                 
                 <div class="form-actions">
@@ -395,7 +405,46 @@ if ($table_exists) {
         </div>
     </div>
 
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
     <script>
+        const Toast = (() => {
+            const container = document.getElementById('toastContainer');
+            if (!container) return { success: alert, error: alert };
+
+            const createToast = (type, message) => {
+                const toast = document.createElement('div');
+                toast.className = `toast ${type}`;
+                toast.innerHTML = `
+                    <div class="toast-icon">
+                        <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
+                    </div>
+                    <div class="toast-content">
+                        <strong>${type === 'success' ? 'Success' : type === 'error' ? 'Error' : 'Notice'}</strong>
+                        <span>${message}</span>
+                    </div>
+                    <button class="toast-close" aria-label="Close notification">&times;</button>
+                `;
+
+                const close = () => {
+                    toast.classList.add('hide');
+                    toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+                };
+
+                toast.querySelector('.toast-close').addEventListener('click', close);
+                container.appendChild(toast);
+
+                requestAnimationFrame(() => toast.classList.add('show'));
+                setTimeout(close, 4000);
+            };
+
+            return {
+                success: msg => createToast('success', msg),
+                error: msg => createToast('error', msg),
+                info: msg => createToast('info', msg)
+            };
+        })();
+
         function logout() {
             localStorage.clear();
             sessionStorage.clear();
@@ -606,9 +655,10 @@ if ($table_exists) {
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
+                        Toast.success('Guideline deleted successfully.');
                         location.reload();
                     } else {
-                        alert('Error: ' + data.message);
+                        Toast.error(data.message || 'Failed to delete guideline.');
                     }
                 })
                 .catch(error => console.error('Error:', error));
@@ -621,7 +671,7 @@ if ($table_exists) {
                 const data = await response.json();
 
                 if (!data.success) {
-                    alert('Unable to load guideline for printing.');
+                    Toast.error('Unable to load guideline for printing.');
                     return;
                 }
 
@@ -652,7 +702,7 @@ if ($table_exists) {
                 window.print();
             } catch (error) {
                 console.error('Print error:', error);
-                alert('An error occurred while preparing the print view.');
+                Toast.error('An error occurred while preparing the print view.');
             } finally {
                 document.body.classList.remove('printing');
             }
@@ -801,24 +851,24 @@ if ($table_exists) {
                     if (!resp.ok || !ct.includes('application/json')) {
                         console.error('Save failed. HTTP', resp.status, raw);
                         if (resp.redirected) {
-                            alert('Session expired. Please log in again.');
+                            Toast.error('Session expired. Please log in again.');
                             window.location.href = resp.url;
                             return;
                         }
-                        alert('Error: ' + (data && data.message ? data.message : (raw || ('HTTP ' + resp.status))));
+                        Toast.error(data && data.message ? data.message : (raw || ('HTTP ' + resp.status)));
                         return;
                     }
                     if (data && data.success) {
-                        alert(data.message || 'Saved successfully');
+                        Toast.success(data.message || 'Saved successfully');
                         closeModal();
                         window.location.reload();
                     } else {
                         console.error('Save error body:', raw);
-                        alert('Error: ' + (data && data.message ? data.message : 'Unknown error'));
+                        Toast.error(data && data.message ? data.message : 'Unknown error while saving.');
                     }
                 } catch (err) {
                     console.error(err);
-                    alert('An error occurred while saving.');
+                    Toast.error('An unexpected error occurred while saving.');
                 } finally {
                     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Guideline'; }
                 }

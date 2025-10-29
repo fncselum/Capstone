@@ -41,7 +41,9 @@ if ($filter_type !== 'all') {
     $sql .= " AND pg.penalty_type = '" . $conn->real_escape_string($filter_type) . "'";
 }
 
-if ($filter_status !== 'all') {
+if ($filter_status === 'all') {
+    $sql .= " AND pg.status <> 'archived'";
+} else {
     $sql .= " AND pg.status = '" . $conn->real_escape_string($filter_status) . "'";
 }
 
