@@ -115,7 +115,6 @@ if ($table_exists) {
         <main class="main-content">
             <header class="top-header">
                 <h1 class="page-title">Penalty Guidelines Management</h1>
-                <p class="page-subtitle">Define penalty rules based on Instructional Media Center policy</p>
                 <button class="add-btn" onclick="openAddModal()">
                     <i class="fas fa-plus"></i> Add Penalty Guideline
                 </button>
@@ -309,7 +308,7 @@ if ($table_exists) {
                 <h2 id="modalTitle">Add Penalty Guideline</h2>
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
-            <form id="guidelineForm" method="POST" action="save_penalty_guideline.php" enctype="multipart/form-data">
+            <form id="guidelineForm" method="POST" action="save_penalty_guideline.php?ajax=1" enctype="multipart/form-data">
                 <input type="hidden" name="id" id="guidelineId">
                 
                 <div class="form-row">
@@ -352,6 +351,14 @@ if ($table_exists) {
                 
                 <div class="form-group">
                     <label for="document">Supporting Document (PDF, DOCX, Images)</label>
+                    <div id="currentDocumentInfo" style="display: none; margin-bottom: 10px; padding: 10px; background: #f8faf9; border-radius: 6px; border-left: 3px solid #1e5631;">
+                        <small style="color: #555;">
+                            <i class="fas fa-file"></i> <strong>Current:</strong> 
+                            <a id="currentDocumentLink" href="#" target="_blank" style="color: #1e5631; text-decoration: none;">View Document</a>
+                        </small>
+                        <br>
+                        <small style="color: #999; font-style: italic;">Upload a new file to replace the current document</small>
+                    </div>
                     <input type="file" id="document" name="document" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
                     <small>Max file size: 5MB</small>
                 </div>
@@ -427,6 +434,8 @@ if ($table_exists) {
             document.getElementById('modalTitle').textContent = 'Add Penalty Guideline';
             document.getElementById('guidelineForm').reset();
             document.getElementById('guidelineId').value = '';
+            // Hide current document info for new guideline
+            document.getElementById('currentDocumentInfo').style.display = 'none';
             document.getElementById('guidelineModal').style.display = 'block';
             applyPolicyTemplate();
         }
@@ -457,6 +466,7 @@ if ($table_exists) {
                 .then(data => {
                     if (data.success) {
                         const g = data.guideline;
+                        const hasDoc = g.document_path && String(g.document_path).trim() !== '';
                         document.getElementById('viewContent').innerHTML = `
                             <div class="view-details">
                                 <h3>${g.title}</h3>
@@ -478,14 +488,20 @@ if ($table_exists) {
                                     <strong>Description:</strong>
                                     <p>${g.penalty_description.replace(/\n/g, '<br>')}</p>
                                 </div>
-                                ${g.document_path ? `
+                                ${hasDoc ? `
                                     <div class="detail-document">
                                         <strong>Document:</strong>
-                                        <a href="${g.document_path}" target="_blank" class="btn-link">
+                                        <button type="button" class="btn-link" onclick="openDocument('${g.document_path.replace(/"/g, '\\"')}')">
                                             <i class="fas fa-paperclip"></i> View Document
-                                        </a>
+                                        </button>
+                                        <div id="documentPreview" style="margin-top:12px;"></div>
                                     </div>
-                                ` : ''}
+                                ` : `
+                                    <div class="detail-document">
+                                        <strong>Document:</strong>
+                                        <p style="margin:8px 0 0;color:#999;">No document uploaded.</p>
+                                    </div>
+                                `}
                                 <div class="detail-meta">
                                     <small>Created: ${g.created_at}</small>
                                     <small>Updated: ${g.updated_at}</small>
@@ -496,6 +512,38 @@ if ($table_exists) {
                     }
                 })
                 .catch(error => console.error('Error:', error));
+        }
+
+        function openDocument(path) {
+            if (!path) return;
+            const lower = path.toLowerCase();
+            const isPdf = lower.endsWith('.pdf');
+            const isImage = lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.gif') || lower.endsWith('.webp');
+            const preview = document.getElementById('documentPreview');
+            if (!preview) {
+                // Fallback: download if preview container not available
+                const a = document.createElement('a');
+                a.href = path;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                return;
+            }
+            if (isPdf) {
+                preview.innerHTML = `<iframe src="${path}#view=FitH" style="width:100%;height:70vh;border:1px solid #e0e0e0;border-radius:8px;"></iframe>`;
+            } else if (isImage) {
+                preview.innerHTML = `<img src="${path}" alt="Document" style="max-width:100%;max-height:70vh;border:1px solid #e0e0e0;border-radius:8px;display:block;" />`;
+            } else {
+                // Not previewable: trigger download (no new tab)
+                preview.innerHTML = '';
+                const a = document.createElement('a');
+                a.href = path;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            }
         }
 
         function editGuideline(id) {
@@ -512,6 +560,18 @@ if ($table_exists) {
                         document.getElementById('penalty_points').value = g.penalty_points;
                         document.getElementById('penalty_description').value = g.penalty_description;
                         document.getElementById('status').value = g.status;
+                        
+                        // Show current document if exists
+                        const currentDocInfo = document.getElementById('currentDocumentInfo');
+                        const currentDocLink = document.getElementById('currentDocumentLink');
+                        if (g.document_path) {
+                            currentDocLink.href = g.document_path;
+                            currentDocLink.textContent = g.document_path.split('/').pop();
+                            currentDocInfo.style.display = 'block';
+                        } else {
+                            currentDocInfo.style.display = 'none';
+                        }
+                        
                         document.getElementById('guidelineModal').style.display = 'block';
                         applyPolicyTemplate(false);
                     }
@@ -602,6 +662,24 @@ if ($table_exists) {
             }
         }
 
+        // Intercept guideline card document links to avoid opening new tab
+        document.addEventListener('click', function(e) {
+            const anchor = e.target.closest('.document-link a');
+            if (anchor && anchor.href) {
+                e.preventDefault();
+                // If view modal is open, preview inside it; else open a lightweight preview modal
+                if (document.getElementById('viewModal').style.display === 'block') {
+                    openDocument(anchor.getAttribute('href'));
+                } else {
+                    // Create a simple temporary preview container within the guideline modal if present
+                    const temp = document.createElement('div');
+                    temp.id = 'documentPreview';
+                    document.body.appendChild(temp);
+                    openDocument(anchor.getAttribute('href'));
+                }
+            }
+        });
+
         const penaltyPolicyTemplates = {
             'Late Return': {
                 title: 'Overdue Equipment Daily Fee',
@@ -685,6 +763,50 @@ if ($table_exists) {
         }
 
         document.getElementById('penalty_type').addEventListener('change', () => applyPolicyTemplate());
+
+        // AJAX submit for add/edit form
+        (function() {
+            const form = document.getElementById('guidelineForm');
+            if (!form) return;
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const btn = form.querySelector('.btn-save');
+                if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+                try {
+                    const formData = new FormData(form);
+                    const resp = await fetch(form.action, { method: 'POST', body: formData, credentials: 'same-origin', redirect: 'follow' });
+                    const ct = resp.headers.get('content-type') || '';
+                    const raw = await resp.text();
+                    let data = null;
+                    if (ct.includes('application/json')) {
+                        try { data = JSON.parse(raw); } catch(parseErr) { data = null; }
+                    }
+                    if (!resp.ok || !ct.includes('application/json')) {
+                        console.error('Save failed. HTTP', resp.status, raw);
+                        if (resp.redirected) {
+                            alert('Session expired. Please log in again.');
+                            window.location.href = resp.url;
+                            return;
+                        }
+                        alert('Error: ' + (data && data.message ? data.message : (raw || ('HTTP ' + resp.status))));
+                        return;
+                    }
+                    if (data && data.success) {
+                        alert(data.message || 'Saved successfully');
+                        closeModal();
+                        window.location.reload();
+                    } else {
+                        console.error('Save error body:', raw);
+                        alert('Error: ' + (data && data.message ? data.message : 'Unknown error'));
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert('An error occurred while saving.');
+                } finally {
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Guideline'; }
+                }
+            });
+        })();
     </script>
 </body>
 </html>

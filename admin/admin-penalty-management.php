@@ -207,12 +207,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
 
     if ($action === 'create_penalty') {
+        // First, get guideline details if guideline_id is provided
+        $guideline_id = (int)($_POST['guideline_id'] ?? 0);
+        $penalty_type = '';
+        $penalty_amount = 0;
+        $penalty_description = '';
+        
+        if ($guideline_id > 0) {
+            $guideline = $penaltySystem->getGuidelineById($guideline_id);
+            if ($guideline) {
+                $penalty_type = $guideline['penalty_type'] ?? '';
+                $penalty_amount = (float)($guideline['penalty_amount'] ?? 0);
+                $penalty_description = $guideline['penalty_description'] ?? '';
+            }
+        }
+        
         $payload = [
             'transaction_id' => (int)($_POST['transaction_id'] ?? 0),
             'user_id' => (int)($_POST['user_id'] ?? 0) ?: null,
             'borrower_identifier' => trim($_POST['rfid_id'] ?? ''),
-            'penalty_type' => trim($_POST['penalty_type'] ?? ''),
-            'guideline_id' => (int)($_POST['guideline_id'] ?? 0) ?: null,
+            'penalty_type' => $penalty_type,
+            'guideline_id' => $guideline_id ?: null,
             'equipment_id' => trim($_POST['equipment_id'] ?? ''),
             'equipment_name' => trim($_POST['equipment_name'] ?? ''),
             'damage_severity' => $_POST['damage_severity'] ?? null,
@@ -221,25 +236,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             'similarity_score' => isset($_POST['similarity_score']) ? (float)$_POST['similarity_score'] : null,
             'comparison_summary' => trim($_POST['comparison_summary'] ?? ''),
             'admin_assessment' => trim($_POST['admin_assessment'] ?? ''),
-            'description' => trim($_POST['description'] ?? ''),
+            'description' => $penalty_description,
             'days_overdue' => (int)($_POST['days_overdue'] ?? 0),
             'daily_rate' => isset($_POST['daily_rate']) ? (float)$_POST['daily_rate'] : null,
-            'penalty_amount' => isset($_POST['penalty_amount']) ? (float)$_POST['penalty_amount'] : 0,
-            'amount_owed' => isset($_POST['amount_owed']) ? (float)$_POST['amount_owed'] : 0,
-            'amount_note' => trim($_POST['amount_note'] ?? ''),
+            'penalty_amount' => $penalty_amount,
+            'amount_owed' => $penalty_amount,
+            'amount_note' => $penalty_description,
             'notes' => trim($_POST['notes'] ?? '')
         ];
 
         if ($payload['transaction_id'] <= 0 || $payload['penalty_type'] === '' || $payload['equipment_name'] === '') {
             $error_message = "Please complete all required fields for creating a penalty.";
         } else {
-            if ($payload['guideline_id']) {
-                $guideline = $penaltySystem->getGuidelineById($payload['guideline_id']);
-                if ($guideline) {
-                    $payload['penalty_amount'] = $payload['penalty_amount'] ?: (float)$guideline['penalty_amount'];
-                    $payload['amount_note'] = $payload['amount_note'] ?: $guideline['penalty_description'];
-                }
-            }
 
             if ($payload['penalty_type'] === 'Late Return' && $payload['days_overdue'] > 0) {
                 $dailyRate = $payload['daily_rate'] ?: PenaltySystem::DEFAULT_DAILY_RATE;
@@ -436,7 +444,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
                         <input type="hidden" name="rfid_id" value="<?= htmlspecialchars($damage_penalty_data['borrower_reference'] ?? '') ?>">
                         <input type="hidden" name="equipment_id" value="<?= htmlspecialchars($damage_penalty_data['equipment_id'] ?? '') ?>">
                         <input type="hidden" name="equipment_name" value="<?= htmlspecialchars($damage_penalty_data['equipment_full_name'] ?? $damage_penalty_data['equipment_name']) ?>">
-                        <input type="hidden" name="penalty_type" value="Damaged">
                         <input type="hidden" name="detected_issues" value="<?= htmlspecialchars($damage_penalty_data['detected_issues'] ?? '') ?>">
                         <input type="hidden" name="similarity_score" value="<?= $damage_penalty_data['similarity_score'] !== null ? htmlspecialchars((string)$damage_penalty_data['similarity_score']) : '' ?>">
                         <input type="hidden" name="comparison_summary" value="<?= htmlspecialchars($damage_penalty_data['comparison_summary'] ?? '') ?>">
@@ -467,18 +474,25 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                 <small><?= htmlspecialchars($damage_penalty_data['suggested_guideline_reason'] ?? 'Auto-suggested based on damage severity') ?></small>
                             </div>
                         </div>
-                        <input type="hidden" name="guideline_id" value="<?= htmlspecialchars($damage_penalty_data['suggested_guideline_id']) ?>">
                         <?php endif; ?>
 
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="damage_severity">Damage Severity: <span class="required">*</span></label>
                                 <select name="damage_severity" id="damage_severity" required>
-                                    <option value="">Select severity level</option>
-                                    <option value="minor" <?= $damage_penalty_data['severity_level'] === 'none' || ($damage_penalty_data['similarity_score'] !== null && $damage_penalty_data['similarity_score'] >= 70) ? 'selected' : '' ?>>Minor - Cosmetic damage only</option>
-                                    <option value="moderate" <?= $damage_penalty_data['severity_level'] === 'medium' || ($damage_penalty_data['similarity_score'] !== null && $damage_penalty_data['similarity_score'] >= 50 && $damage_penalty_data['similarity_score'] < 70) ? 'selected' : '' ?>>Moderate - Affects appearance/partial function</option>
-                                    <option value="severe" <?= $damage_penalty_data['severity_level'] === 'high' || ($damage_penalty_data['similarity_score'] !== null && $damage_penalty_data['similarity_score'] < 50) ? 'selected' : '' ?>>Severe - Significant functionality loss</option>
-                                    <option value="total_loss">Total Loss - Beyond repair</option>
+                                    <option value="">-- Select Damage Severity --</option>
+                                    <option value="minor" <?= $damage_penalty_data['severity_level'] === 'none' || ($damage_penalty_data['similarity_score'] !== null && $damage_penalty_data['similarity_score'] >= 70) ? 'selected' : '' ?>>
+                                        Minor - Superficial scratches, scuffs, or cosmetic wear
+                                    </option>
+                                    <option value="moderate" <?= $damage_penalty_data['severity_level'] === 'medium' || ($damage_penalty_data['similarity_score'] !== null && $damage_penalty_data['similarity_score'] >= 50 && $damage_penalty_data['similarity_score'] < 70) ? 'selected' : '' ?>>
+                                        Moderate - Visible damage affecting appearance or partial functionality
+                                    </option>
+                                    <option value="severe" <?= $damage_penalty_data['severity_level'] === 'high' || ($damage_penalty_data['similarity_score'] !== null && $damage_penalty_data['similarity_score'] < 50) ? 'selected' : '' ?>>
+                                        Severe - Major damage with significant functionality loss or safety concerns
+                                    </option>
+                                    <option value="total_loss">
+                                        Total Loss - Equipment is beyond repair or replacement required
+                                    </option>
                                 </select>
                             </div>
 
@@ -489,17 +503,33 @@ $stats = $penaltySystem->getPenaltyStatistics();
                         </div>
 
                         <div class="form-group">
-                            <label for="admin_notes">Final Decision / Action to Take:</label>
-                            <textarea name="notes" id="admin_notes" rows="4" placeholder="Document the penalty or action that will be applied for this damage..."></textarea>
+                            <label for="penalty_guideline">Select Penalty Guideline to Issue: <span class="required">*</span></label>
+                            <select name="guideline_id" id="penalty_guideline" required>
+                                <option value="">-- Select a Penalty Guideline --</option>
+                                <?php foreach ($activeGuidelines as $guideline): ?>
+                                    <option value="<?= htmlspecialchars($guideline['id']) ?>" 
+                                            <?= (!empty($damage_penalty_data['suggested_guideline_id']) && $guideline['id'] == $damage_penalty_data['suggested_guideline_id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($guideline['guideline_name'] ?? $guideline['title']) ?> 
+                                        (<?= htmlspecialchars($guideline['penalty_type']) ?>) - 
+                                        ₱<?= number_format($guideline['penalty_amount'], 2) ?>
+                                        <?php if (!empty($guideline['penalty_points'])): ?>
+                                            | <?= htmlspecialchars($guideline['penalty_points']) ?> points
+                                        <?php endif; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="form-hint">Select the appropriate penalty guideline based on the damage severity and assessment.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="admin_notes">Additional Notes (Optional):</label>
+                            <textarea name="notes" id="admin_notes" rows="3" placeholder="Add any additional remarks or special circumstances..."></textarea>
                         </div>
 
                         <div class="form-actions">
                             <button type="submit" class="btn btn-danger">
-                                <i class="fas fa-gavel"></i> Record Damage Penalty
+                                <i class="fas fa-gavel"></i> Issue Penalty
                             </button>
-                            <a href="admin-all-transaction.php" class="btn btn-secondary">
-                                <i class="fas fa-arrow-left"></i> Back to Transactions
-                            </a>
                         </div>
                     </form>
                 </div>
@@ -1136,6 +1166,14 @@ $stats = $penaltySystem->getPenaltyStatistics();
             color: #666;
             margin-top: 5px;
             display: block;
+        }
+
+        .form-hint {
+            display: block;
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 6px;
+            font-style: italic;
         }
         
         .penalty-preview {
