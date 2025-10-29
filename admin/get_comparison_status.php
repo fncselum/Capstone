@@ -20,7 +20,7 @@ if ($transactionId <= 0) {
     exit;
 }
 
-// Fetch transaction status
+// Fetch transaction status including AI fields
 $query = $conn->prepare("SELECT 
     t.id,
     t.return_verification_status,
@@ -28,7 +28,12 @@ $query = $conn->prepare("SELECT
     t.similarity_score,
     t.detected_issues,
     t.severity_level,
-    t.status
+    t.status,
+    t.ai_analysis_status,
+    t.ai_analysis_message,
+    t.ai_similarity_score,
+    t.ai_severity_level,
+    t.ai_analysis_meta
 FROM transactions t
 WHERE t.id = ?");
 
@@ -85,6 +90,12 @@ $response = [
     'preview_path' => $previewPath,
     'is_analyzing' => strtolower($row['return_verification_status'] ?? '') === 'analyzing',
     'detailed_metrics' => $detailedMetrics,
+    'ai_analysis_status' => $row['ai_analysis_status'],
+    'ai_analysis_message' => $row['ai_analysis_message'],
+    'ai_similarity_score' => $row['ai_similarity_score'],
+    'ai_severity_level' => $row['ai_severity_level'],
+    'ai_analysis_meta' => $row['ai_analysis_meta'],
+    'is_ai_analyzing' => in_array(strtolower($row['ai_analysis_status'] ?? ''), ['pending', 'processing']),
 ];
 
 echo json_encode($response);

@@ -335,12 +335,22 @@ if (!$all_transactions) {
             color: #388e3c;
         }
         .return-verification-badge.flagged {
-            background: #fff3e0;
-            color: #fb8c00;
+            background: #fff3cd;
+            color: #b45309;
+        }
+        .return-verification-badge.damage {
+            background: #fee2e2;
+            color: #b91c1c;
         }
         .return-verification-badge.rejected {
             background: #ffebee;
             color: #c62828;
+        }
+        .return-row-flagged {
+            background: linear-gradient(to right, rgba(254, 215, 170, 0.25), rgba(255, 247, 225, 0.1));
+        }
+        .return-row-damage {
+            background: linear-gradient(to right, rgba(254, 226, 226, 0.3), rgba(255, 241, 242, 0.15));
         }
         .return-verification-score {
             font-size: 0.85em;
@@ -425,12 +435,13 @@ if (!$all_transactions) {
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0,0,0,0.4);
+            background: rgba(0,0,0,0.6);
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 999;
+            z-index: 10000;
             padding: 20px;
+            overflow-y: auto;
         }
         .approval-modal.show {
             display: flex;
@@ -502,6 +513,18 @@ if (!$all_transactions) {
         }
         .flag-btn:hover {
             background: #f57c00;
+        }
+        .penalty-btn {
+            background: #9c27b0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .penalty-btn:hover {
+            background: #7b1fa2;
+        }
+        .penalty-btn i {
+            font-size: 14px;
         }
         .return-review-modal {
             max-width: 850px;
@@ -623,14 +646,13 @@ if (!$all_transactions) {
         .detected-issues-section {
             margin: 15px 0;
             padding: 15px;
-            background: linear-gradient(to bottom, #f8f9fa, #f1f3f5);
-            border-left: 4px solid #4e73df;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 6px solid transparent;
+            border: 1px solid rgba(0,0,0,0.05);
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
             transition: all 0.3s ease;
-            width: 100%;
-            box-sizing: border-box;
-            max-width: 100%;
+            position: relative;
             overflow: hidden;
         }
         @media (max-width: 768px) {
@@ -643,13 +665,9 @@ if (!$all_transactions) {
             margin: 0 0 10px 0;
             color: #2c3e50;
             font-size: 1em;
-            font-weight: 600;
             display: flex;
             align-items: center;
             gap: 8px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
         @media (max-width: 768px) {
             .detected-issues-section h4 {
@@ -658,10 +676,18 @@ if (!$all_transactions) {
             }
         }
         .detected-issues-section h4:before {
-            content: '\f06a';
+            content: '\f058';
             font-family: 'Font Awesome 5 Free';
             font-weight: 900;
-            color: #4e73df;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: rgba(16, 185, 129, 0.15);
+            color: #0f9d58;
+            font-size: 0.85em;
         }
         .detected-issues-content {
             background: #fff;
@@ -698,41 +724,43 @@ if (!$all_transactions) {
             }
         }
         /* Severity-based styling for detected issues */
-        .detected-issues-section.severity-high {
-            border-left-color: #e74c3c;
-            background: linear-gradient(to bottom, #fef2f2, #fff5f5);
-        }
-        .detected-issues-section.severity-high h4 {
-            color: #c0392b;
-        }
-        .detected-issues-section.severity-high h4:before {
-            color: #e74c3c;
-            content: '\f071';
-        }
-        
-        .detected-issues-section.severity-medium {
-            border-left-color: #f39c12;
-            background: linear-gradient(to bottom, #fff8e6, #fffaf0);
-        }
-        .detected-issues-section.severity-medium h4 {
-            color: #d35400;
-        }
-        .detected-issues-section.severity-medium h4:before {
-            color: #f39c12;
-            content: '\f06a';
-        }
-        
-        .detected-issues-section.severity-low {
-            border-left-color: #3498db;
-        }
-        
         .detected-issues-section.severity-none {
-            border-left-color: #2ecc71;
-            background: linear-gradient(to bottom, #f0fdf4, #f7fee7);
+            border-left-color: #22c55e;
+            background: linear-gradient(to bottom, #f0fdf4, #dcfce7);
+        }
+        .detected-issues-section.severity-none h4 {
+            color: #15803d;
         }
         .detected-issues-section.severity-none h4:before {
-            color: #2ecc71;
+            background: rgba(34, 197, 94, 0.18);
+            color: #15803d;
             content: '\f058';
+        }
+
+        .detected-issues-section.severity-medium {
+            border-left-color: #f97316;
+            background: linear-gradient(to bottom, #fff7ed, #ffedd5);
+        }
+        .detected-issues-section.severity-medium h4 {
+            color: #c2410c;
+        }
+        .detected-issues-section.severity-medium h4:before {
+            background: rgba(249, 115, 22, 0.18);
+            color: #c2410c;
+            content: '\f06a';
+        }
+
+        .detected-issues-section.severity-high {
+            border-left-color: #ef4444;
+            background: linear-gradient(to bottom, #fef2f2, #fee2e2);
+        }
+        .detected-issues-section.severity-high h4 {
+            color: #b91c1c;
+        }
+        .detected-issues-section.severity-high h4:before {
+            background: rgba(239, 68, 68, 0.18);
+            color: #b91c1c;
+            content: '\f071';
         }
 
         .approval-na {
@@ -755,52 +783,277 @@ if (!$all_transactions) {
         .inventory-status-badge.out-of-stock {
             background: #d32f2f;
         }
+
+        /* Penalty Preview Modal Styles */
+        #penaltyPreviewModal {
+            z-index: 10001; /* Higher than other modals */
+        }
+        
+        .penalty-preview-modal {
+            max-width: 700px;
+            width: 95%;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            animation: modalSlideIn 0.3s ease-out;
+            overflow: hidden;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .penalty-preview-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 18px 24px;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .penalty-preview-header h2 {
+            margin: 0;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .penalty-preview-header button {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            font-size: 28px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .penalty-preview-header button:hover {
+            background: rgba(255,255,255,0.3);
+            transform: rotate(90deg);
+        }
+
+        .penalty-preview-body {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .penalty-preview-alert {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border-left: 4px solid #f39c12;
+            padding: 16px 24px;
+            margin: 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            color: #856404;
+        }
+
+        .penalty-preview-alert i {
+            font-size: 1.5rem;
+            color: #f39c12;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .penalty-preview-details {
+            background: #f8f9fa;
+            padding: 20px 24px;
+            margin: 0;
+        }
+
+        .preview-detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .preview-detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .preview-label {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .preview-value {
+            color: #2d3436;
+            font-weight: 500;
+            text-align: right;
+        }
+
+        .preview-value.severity-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .preview-value.severity-minor {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .preview-value.severity-moderate {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .preview-value.severity-medium {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .preview-value.severity-severe {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .penalty-preview-issues {
+            background: #fff3cd;
+            border: 2px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 20px 24px 24px 24px;
+        }
+
+        .penalty-preview-issues h4 {
+            margin: 0 0 12px 0;
+            color: #856404;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .preview-issues-content {
+            color: #856404;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .penalty-preview-actions {
+            padding: 18px 24px;
+            border-top: 2px solid #e9ecef;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            flex-shrink: 0;
+            background: white;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .penalty-preview-actions button {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .penalty-preview-actions .approval-cancel-btn {
+            background: #e9ecef;
+            color: #495057;
+        }
+
+        .penalty-preview-actions .approval-cancel-btn:hover {
+            background: #dee2e6;
+        }
+
+        .penalty-preview-actions .approval-submit-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .penalty-preview-actions .approval-submit-btn:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+
+        /* Responsive Design for Penalty Preview Modal */
+        @media (max-width: 768px) {
+            .penalty-preview-modal {
+                width: 100%;
+                max-width: 100%;
+                max-height: 100vh;
+                border-radius: 0;
+            }
+
+            .penalty-preview-header {
+                border-radius: 0;
+                padding: 16px 20px;
+            }
+
+            .penalty-preview-header h2 {
+                font-size: 1.1rem;
+            }
+
+            .penalty-preview-body {
+                padding: 20px;
+            }
+
+            .penalty-preview-details {
+                padding: 16px;
+            }
+
+            .preview-detail-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+                padding: 10px 0;
+            }
+
+            .preview-value {
+                text-align: left;
+            }
+
+            .penalty-preview-actions {
+                padding: 16px 20px;
+                flex-direction: column-reverse;
+            }
+
+            .penalty-preview-actions button {
+                width: 100%;
+            }
+        }
+
+        /* Ensure modal appears above everything */
+        .approval-modal {
+            backdrop-filter: blur(2px);
+        }
     </style>
 </head>
 <body>
     <div class="admin-container">
-        <!-- Sidebar -->
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <img src="../uploads/De lasalle ASMC.png" alt="De La Salle ASMC Logo" class="main-logo" style="height:30px; width:auto;">
-                    <span class="logo-text">Admin Panel</span>
-                </div>
-                <button class="sidebar-toggle" id="sidebarToggle">
-                    <i class="fas fa-bars"></i>
-                </button>
-            </div>
-            
-            <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="admin-dashboard.php"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-equipment-inventory.php"><i class="fas fa-boxes"></i><span>Equipment Inventory</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="reports.php"><i class="fas fa-file-alt"></i><span>Reports</span></a>
-                </li>
-                <li class="nav-item active">
-                    <a href="admin-all-transaction.php"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-guideline.php"><i class="fas fa-exclamation-triangle"></i><span>Penalty Guidelines</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-management.php"><i class="fas fa-gavel"></i><span>Penalty Management</span></a>
-                </li>
-            </ul>
-
-            <div class="sidebar-footer">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
-                </button>
-            </div>
-        </nav>
+        <?php include 'includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">
@@ -966,6 +1219,10 @@ if (!$all_transactions) {
                                     $referencePhotos[] = $equipmentImageResolved;
                                 }
                                 $similarityScore = isset($row['similarity_score']) ? (float)$row['similarity_score'] : null;
+                                $scoreDisplayText = $similarityScore !== null
+                                    ? 'Similarity: ' . number_format($similarityScore, 2) . '%'
+                                    : '';
+                                $scoreDisplayType = $similarityScore !== null ? 'offline' : '';
                                 $verificationStatus = $row['return_verification_status'] ?? 'Pending';
                                 $reviewStatus = $row['return_review_status'] ?? 'Pending';
                                 $verificationClassMap = [
@@ -1000,6 +1257,7 @@ if (!$all_transactions) {
             'similarityScore' => $similarityScore,
             'itemSize' => $row['item_size'] ?? null,
             'equipmentName' => $row['equipment_name'] ?? null,
+            'studentId' => $row['student_id'] ?? null,
             'status' => $row['status'] ?? null,
             'detectedIssues' => $row['detected_issues'] ?? null,
             'severityLevel' => $row['severity_level'] ?? 'none',
@@ -1012,7 +1270,7 @@ if (!$all_transactions) {
                                 ];
                                 $returnInfoJson = htmlspecialchars(json_encode($returnInfo, JSON_UNESCAPED_SLASHES), ENT_QUOTES, 'UTF-8');
                             ?>
-                            <tr id="<?= $rowId ?>" data-status="<?= $status ?>" data-item-size="<?= htmlspecialchars(strtolower($row['item_size'] ?? '')) ?>" data-approval-status="<?= htmlspecialchars($approvalStatus) ?>" data-equipment-name="<?= htmlspecialchars($row['equipment_name']) ?>" data-return-info="<?= $returnInfoJson ?>">
+                            <tr id="<?= $rowId ?>" data-status="<?= $status ?>" data-item-size="<?= htmlspecialchars(strtolower($row['item_size'] ?? '')) ?>" data-approval-status="<?= htmlspecialchars($approvalStatus) ?>" data-equipment-name="<?= htmlspecialchars($row['equipment_name']) ?>" data-offline-score="<?= $similarityScore !== null ? htmlspecialchars((string)$similarityScore) : '' ?>" data-return-info="<?= $returnInfoJson ?>">
                                 <td>
                                     <strong><?= htmlspecialchars($row['equipment_name']) ?></strong>
                                 </td>
@@ -1050,8 +1308,8 @@ if (!$all_transactions) {
                                 <td data-return-verification>
                                     <div class="return-verification-cell">
                                         <span class="return-verification-badge <?= $verificationBadgeClass ?>" data-return-verification-badge><?= htmlspecialchars($displayVerificationText) ?></span>
-                                        <span class="return-verification-score" data-return-verification-score style="<?= $similarityScore === null ? 'display:none;' : '' ?>">
-                                            <?= $similarityScore !== null ? 'Score: ' . number_format($similarityScore, 2) . '%' : '' ?>
+                                        <span class="return-verification-score" data-return-verification-score data-score-type="<?= htmlspecialchars($scoreDisplayType) ?>" style="<?= $scoreDisplayText === '' ? 'display:none;' : '' ?>">
+                                            <?= htmlspecialchars($scoreDisplayText) ?>
                                         </span>
                                         <?php if ($showReturnReviewButton): ?>
                                         <button type="button" class="view-return-btn" data-return-review data-transaction-id="<?= $transactionId ?>" <?= $canOpenReturnReview ? '' : 'disabled' ?>>
@@ -1144,6 +1402,54 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         </div>
     </div>
 
+    <!-- Penalty Preview Modal -->
+    <div id="penaltyPreviewModal" class="approval-modal" role="dialog" aria-modal="true" aria-labelledby="penaltyPreviewTitle">
+        <div class="approval-modal-content penalty-preview-modal">
+            <div class="penalty-preview-header">
+                <h2 id="penaltyPreviewTitle"><i class="fas fa-gavel"></i> Create Penalty Record</h2>
+                <button type="button" id="penaltyPreviewClose" aria-label="Close preview">&times;</button>
+            </div>
+            <div class="penalty-preview-body">
+                <div class="penalty-preview-alert">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>You are about to create a penalty record for this transaction. Please review the details below.</span>
+                </div>
+                <div class="penalty-preview-details">
+                    <div class="preview-detail-row">
+                        <span class="preview-label">Equipment:</span>
+                        <span class="preview-value" id="previewEquipmentName">-</span>
+                    </div>
+                    <div class="preview-detail-row">
+                        <span class="preview-label">Transaction ID:</span>
+                        <span class="preview-value" id="previewTransactionId">-</span>
+                    </div>
+                    <div class="preview-detail-row">
+                        <span class="preview-label">Student ID:</span>
+                        <span class="preview-value" id="previewStudentId">-</span>
+                    </div>
+                    <div class="preview-detail-row">
+                        <span class="preview-label">Similarity Score:</span>
+                        <span class="preview-value" id="previewSimilarityScore">-</span>
+                    </div>
+                    <div class="preview-detail-row">
+                        <span class="preview-label">Severity Level:</span>
+                        <span class="preview-value" id="previewSeverityLevel">-</span>
+                    </div>
+                </div>
+                <div class="penalty-preview-issues">
+                    <h4><i class="fas fa-clipboard-list"></i> Detected Issues</h4>
+                    <div class="preview-issues-content" id="previewDetectedIssues">No issues detected</div>
+                </div>
+            </div>
+            <div class="penalty-preview-actions">
+                <button type="button" class="approval-cancel-btn" id="penaltyPreviewCancel">Cancel</button>
+                <button type="button" class="approval-submit-btn" id="penaltyPreviewProceed">
+                    <i class="fas fa-arrow-right"></i> Proceed to Penalty Management
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div id="returnReviewModal" class="approval-modal" role="dialog" aria-modal="true" aria-labelledby="returnReviewTitle">
         <div class="approval-modal-content return-review-modal">
             <div class="return-review-header">
@@ -1182,7 +1488,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 <div class="return-review-buttons">
                     <button type="button" class="approval-btn approve-btn" data-review-action="verify">Mark Verified</button>
                     <button type="button" class="approval-btn flag-btn" data-review-action="flag">Flag for Review</button>
-                    <button type="button" class="approval-btn reject-btn" data-review-action="reject">Reject Return</button>
+                    <button type="button" class="approval-btn penalty-btn" data-review-action="add_penalty">
+                        <i class="fas fa-gavel"></i> Add to Penalty
+                    </button>
                 </div>
                 <div class="return-review-textarea" data-review-notes-container style="display:none;">
                     <span style="font-weight:600;">Additional Notes</span>
@@ -1277,10 +1585,14 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         }
 
         function getActiveSimilarity() {
-            if (!activeReturnReview || activeReturnReview.similarityScore === undefined || activeReturnReview.similarityScore === null) {
+            if (!activeReturnReview) {
                 return null;
             }
-            const numeric = parseFloat(activeReturnReview.similarityScore);
+            const candidate = activeReturnReview.similarityScore;
+            if (candidate === null || candidate === undefined) {
+                return null;
+            }
+            const numeric = parseFloat(candidate);
             return Number.isFinite(numeric) ? numeric : null;
         }
 
@@ -1304,7 +1616,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             }
 
             const issuesSection = detectedIssuesDisplay.closest('.detected-issues-section');
-            const severityClasses = ['severity-none', 'severity-low', 'severity-medium', 'severity-high'];
+            const severityClasses = ['severity-none', 'severity-medium', 'severity-high'];
             if (issuesSection) {
                 issuesSection.classList.remove(...severityClasses);
             }
@@ -1315,14 +1627,12 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
 
             if (hasText) {
                 if (similarity !== null) {
-                    if (similarity < 70) {
+                    if (similarity < 50) {
                         severityClass = 'severity-high';
-                    } else if (similarity < 85) {
+                    } else if (similarity < 70) {
                         severityClass = 'severity-medium';
-                    } else if (similarity < 95) {
-                        severityClass = 'severity-low';
                     } else {
-                        severityClass = 'severity-low';
+                        severityClass = 'severity-none';
                     }
                 } else {
                     severityClass = 'severity-medium';
@@ -1335,7 +1645,6 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 const iconMap = {
                     'severity-high': 'exclamation-triangle',
                     'severity-medium': 'exclamation-circle',
-                    'severity-low': 'info-circle',
                     'severity-none': 'check-circle'
                 };
 
@@ -1353,16 +1662,14 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 }
             }
 
-            // Display system auto-detected issues
+            // Display detected issues from offline comparison
             detectedIssuesDisplay.textContent = hasText ? text : 'No issues detected';
-            
-            // Show comparison method if available
-            if (activeReturnReview && activeReturnReview.comparisonMethod) {
-                const methodText = ` (Method: ${activeReturnReview.comparisonMethod})`;
-                detectedIssuesDisplay.textContent += methodText;
+            detectedIssuesDisplay.style.fontStyle = 'normal';
+            detectedIssuesDisplay.style.color = '';
+
+            if (activeReturnReview) {
+                activeReturnReview.detectedIssues = text;
             }
-            
-            detectedIssuesDisplay.style.display = 'block';
         }
 
         function syncDetectedIssues(text) {
@@ -1399,8 +1706,19 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             }
             applyVerificationBadgeClass(returnReviewStatusBadge, info.verificationStatus);
             if (returnReviewScore) {
-                if (info.similarityScore !== null && info.similarityScore !== undefined) {
-                    returnReviewScore.textContent = 'Score: ' + Number(info.similarityScore).toFixed(2) + '%';
+                let scoreLabel = '';
+                if (info.aiAnalysisStatus && info.aiAnalysisStatus.toLowerCase() === 'completed' && info.aiSimilarityScore !== null && info.aiSimilarityScore !== undefined) {
+                    scoreLabel = 'AI Score: ' + Number(info.aiSimilarityScore).toFixed(2) + '%';
+                    returnReviewScore.dataset.scoreType = 'ai';
+                } else if (info.similarityScore !== null && info.similarityScore !== undefined) {
+                    scoreLabel = 'Offline Score: ' + Number(info.similarityScore).toFixed(2) + '%';
+                    returnReviewScore.dataset.scoreType = 'offline';
+                } else {
+                    delete returnReviewScore.dataset.scoreType;
+                }
+
+                if (scoreLabel) {
+                    returnReviewScore.textContent = scoreLabel;
                     returnReviewScore.style.display = 'inline-block';
                 } else {
                     returnReviewScore.textContent = '';
@@ -1418,6 +1736,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             
             // Enhanced auto-detection display
             applyDetectedIssuesUI(info.detectedIssues);
+            activeReturnReview.offlineSimilarityScore = info.similarityScore ?? null;
             
             resetReturnReviewNotes();
             if (returnReviewModal) {
@@ -1462,9 +1781,11 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
 
         function closeReturnReviewModal() {
             if (returnReviewModal) {
+                returnReviewModal.style.display = 'none';
                 returnReviewModal.classList.remove('show');
             }
             activeReturnReview = null;
+            document.body.style.overflow = '';
         }
 
         function handleReturnReviewButton(action) {
@@ -1472,7 +1793,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 return;
             }
             if (returnReviewNotesContainer) {
-                if (action === 'flag' || action === 'reject') {
+                if (action === 'flag' || action === 'add_penalty') {
                     returnReviewNotesContainer.style.display = 'flex';
                 } else {
                     returnReviewNotesContainer.style.display = 'none';
@@ -1631,8 +1952,15 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             if (!action) {
                 return;
             }
+            
+            // Handle add_penalty action - show preview modal first
+            if (action === 'add_penalty') {
+                showPenaltyPreview();
+                return;
+            }
+            
             let notes = '';
-            const requiresNotes = action === 'flag' || action === 'reject';
+            const requiresNotes = action === 'flag';
             if (requiresNotes && returnReviewNotesContainer) {
                 returnReviewNotesContainer.style.display = 'flex';
             }
@@ -1640,7 +1968,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 notes = (returnReviewNotes?.value || '').trim();
                 if (!notes) {
                     if (returnReviewError) {
-                        returnReviewError.textContent = 'Please provide notes before flagging or rejecting this return.';
+                        returnReviewError.textContent = 'Please provide notes before flagging this return.';
                         returnReviewError.style.display = 'block';
                     }
                     if (returnReviewNotes) {
@@ -1664,8 +1992,8 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             
             // System auto-detects issues - no manual input needed
             
-            // Add notes for flag/reject actions
-            if (['flag', 'reject'].includes(action) && returnReviewNotes) {
+            // Add notes for flag action
+            if (action === 'flag' && returnReviewNotes) {
                 const notes = returnReviewNotes.value.trim();
                 if (notes) {
                     payload.append('notes', notes);
@@ -1724,6 +2052,10 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             let reviewStatus = transaction.return_review_status || display.review_status || transaction.return_review_status || 'Pending';
             const finalStatus = transaction.status || display.status || 'Active';
             let similarityScore = transaction.similarity_score ?? display.similarity_score ?? null;
+            const aiStatus = transaction.ai_analysis_status || display.ai_analysis_status || null;
+            const aiSimilarity = transaction.ai_similarity_score ?? display.ai_similarity_score ?? null;
+            const aiMessage = transaction.ai_analysis_message || display.ai_analysis_message || null;
+            const aiSeverity = transaction.ai_severity_level || display.ai_severity_level || null;
             const statusLower = (finalStatus || '').toLowerCase();
             const forceNotReturned = ['active','pending approval','overdue','lost','damaged'].includes(statusLower);
 
@@ -1739,11 +2071,24 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
 
             applyVerificationBadgeClass(badge, verificationStatus);
             if (scoreEl) {
-                if (similarityScore !== null && similarityScore !== undefined) {
-                    scoreEl.textContent = 'Score: ' + Number(similarityScore).toFixed(2) + '%';
+                let displayText = '';
+                let scoreType = '';
+                const normalizedAiStatus = (aiStatus || '').toLowerCase();
+                if (normalizedAiStatus === 'completed' && aiSimilarity !== null && aiSimilarity !== undefined) {
+                    displayText = 'AI Score: ' + Number(aiSimilarity).toFixed(2) + '%';
+                    scoreType = 'ai';
+                } else if (similarityScore !== null && similarityScore !== undefined) {
+                    displayText = 'Offline Score: ' + Number(similarityScore).toFixed(2) + '%';
+                    scoreType = 'offline';
+                }
+
+                if (displayText) {
+                    scoreEl.textContent = displayText;
+                    scoreEl.dataset.scoreType = scoreType;
                     scoreEl.style.display = 'inline-block';
                 } else {
                     scoreEl.textContent = '';
+                    delete scoreEl.dataset.scoreType;
                     scoreEl.style.display = 'none';
                 }
             }
@@ -1771,9 +2116,35 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             } else {
                 delete existingInfo.similarityScore;
             }
+            existingInfo.offlineSimilarityScore = similarityScore !== null && similarityScore !== undefined ? Number(similarityScore) : null;
+            if (aiSimilarity !== null && aiSimilarity !== undefined) {
+                existingInfo.aiSimilarityScore = Number(aiSimilarity);
+            } else {
+                delete existingInfo.aiSimilarityScore;
+            }
+            if (aiStatus) {
+                existingInfo.aiAnalysisStatus = aiStatus;
+            } else {
+                delete existingInfo.aiAnalysisStatus;
+            }
+            if (aiMessage) {
+                existingInfo.aiAnalysisMessage = aiMessage;
+            } else {
+                delete existingInfo.aiAnalysisMessage;
+            }
+            if (aiSeverity) {
+                existingInfo.aiSeverityLevel = aiSeverity;
+            } else {
+                delete existingInfo.aiSeverityLevel;
+            }
             existingInfo.status = finalStatus;
 
             row.dataset.returnInfo = JSON.stringify(existingInfo);
+            row.dataset.aiStatus = (aiStatus || '').toLowerCase();
+            row.dataset.aiScore = aiSimilarity !== null && aiSimilarity !== undefined ? Number(aiSimilarity).toFixed(2) : '';
+            row.dataset.offlineScore = similarityScore !== null && similarityScore !== undefined ? Number(similarityScore).toFixed(2) : '';
+            row.dataset.aiMessage = aiMessage || '';
+            row.dataset.aiSeverity = aiSeverity || '';
         }
 
         function updateRowAfterApproval(row, data, action) {
@@ -2015,38 +2386,181 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 applyVerificationBadgeClass(badge, data.return_verification_status);
             }
             
-            if (scoreEl && data.similarity_score !== null) {
-                scoreEl.textContent = 'Score: ' + Number(data.similarity_score).toFixed(2) + '%';
-                scoreEl.style.display = 'inline-block';
+            if (scoreEl) {
+                let displayText = '';
+                let scoreType = '';
+                const aiStatus = (data.ai_analysis_status || '').toLowerCase();
+                if (aiStatus === 'completed' && data.ai_similarity_score !== null && data.ai_similarity_score !== undefined) {
+                    displayText = 'AI Score: ' + Number(data.ai_similarity_score).toFixed(2) + '%';
+                    scoreType = 'ai';
+                } else if (data.similarity_score !== null && data.similarity_score !== undefined) {
+                    displayText = 'Offline Score: ' + Number(data.similarity_score).toFixed(2) + '%';
+                    scoreType = 'offline';
+                }
+
+                if (displayText) {
+                    scoreEl.textContent = displayText;
+                    scoreEl.dataset.scoreType = scoreType;
+                    scoreEl.style.display = 'inline-block';
+                } else {
+                    scoreEl.textContent = '';
+                    delete scoreEl.dataset.scoreType;
+                    scoreEl.style.display = 'none';
+                }
             }
-            
+
             // Update return info data attribute
             try {
                 const existingInfo = JSON.parse(row.dataset.returnInfo || '{}');
                 existingInfo.verificationStatus = data.return_verification_status;
                 existingInfo.reviewStatus = data.return_review_status;
                 existingInfo.similarityScore = data.similarity_score;
+                existingInfo.offlineSimilarityScore = data.similarity_score;
+                existingInfo.aiAnalysisStatus = data.ai_analysis_status;
+                existingInfo.aiAnalysisMessage = data.ai_analysis_message;
+                existingInfo.aiSimilarityScore = data.ai_similarity_score;
+                existingInfo.aiSeverityLevel = data.ai_severity_level;
+                existingInfo.aiAnalysisMeta = data.ai_analysis_meta;
                 existingInfo.detectedIssues = data.detected_issues;
                 existingInfo.severityLevel = data.severity_level;
                 row.dataset.returnInfo = JSON.stringify(existingInfo);
+                row.dataset.aiStatus = (data.ai_analysis_status || '').toLowerCase();
+                row.dataset.aiScore = data.ai_similarity_score !== null && data.ai_similarity_score !== undefined ? Number(data.ai_similarity_score).toFixed(2) : '';
+                row.dataset.offlineScore = data.similarity_score !== null && data.similarity_score !== undefined ? Number(data.similarity_score).toFixed(2) : '';
+                row.dataset.aiMessage = data.ai_analysis_message || '';
+                row.dataset.aiSeverity = data.ai_severity_level || '';
             } catch (err) {
-                console.error('Failed to update return info:', err);
+                console.error('Failed to update return info dataset:', err);
+            }
+
+            applyDetectedIssuesUI(data.detected_issues);
+        }
+
+        // Penalty Preview Modal Functions
+        const penaltyPreviewModal = document.getElementById('penaltyPreviewModal');
+        const penaltyPreviewClose = document.getElementById('penaltyPreviewClose');
+        const penaltyPreviewCancel = document.getElementById('penaltyPreviewCancel');
+        const penaltyPreviewProceed = document.getElementById('penaltyPreviewProceed');
+        let pendingPenaltyData = null;
+
+        function showPenaltyPreview() {
+            if (!activeReturnReview) return;
+
+            const transactionId = activeReturnReview.transactionId;
+            const equipmentName = activeReturnReview.equipmentName || 'Unknown Equipment';
+            const studentId = activeReturnReview.studentId || 'N/A';
+            const detectedIssues = activeReturnReview.detectedIssues || 'No issues detected';
+            const similarityScore = activeReturnReview.similarityScore !== null && activeReturnReview.similarityScore !== undefined 
+                ? Number(activeReturnReview.similarityScore).toFixed(2) + '%' 
+                : 'N/A';
+            
+            // Determine severity level based on similarity score
+            let severityLevel = 'Medium';
+            let severityClass = 'severity-medium';
+            const scoreValue = activeReturnReview.similarityScore;
+            if (scoreValue !== null && scoreValue !== undefined) {
+                if (scoreValue < 50) {
+                    severityLevel = 'Severe';
+                    severityClass = 'severity-severe';
+                } else if (scoreValue < 70) {
+                    severityLevel = 'Moderate';
+                    severityClass = 'severity-moderate';
+                } else if (scoreValue < 85) {
+                    severityLevel = 'Minor';
+                    severityClass = 'severity-minor';
+                } else {
+                    severityLevel = 'Very Minor';
+                    severityClass = 'severity-minor';
+                }
+            }
+
+            // Populate modal
+            document.getElementById('previewEquipmentName').textContent = equipmentName;
+            document.getElementById('previewTransactionId').textContent = '#' + transactionId;
+            document.getElementById('previewStudentId').textContent = studentId;
+            document.getElementById('previewSimilarityScore').textContent = similarityScore;
+            
+            const severityEl = document.getElementById('previewSeverityLevel');
+            severityEl.textContent = severityLevel;
+            severityEl.className = 'preview-value severity-badge ' + severityClass;
+            
+            document.getElementById('previewDetectedIssues').textContent = detectedIssues;
+
+            // Store data for proceed action
+            pendingPenaltyData = {
+                transaction_id: transactionId,
+                equipment_name: equipmentName,
+                student_id: studentId,
+                detected_issues: detectedIssues,
+                similarity_score: activeReturnReview.similarityScore || 0,
+                severity_level: severityLevel.toLowerCase().replace(' ', '_')
+            };
+
+            // Hide the return review modal first
+            if (returnReviewModal) {
+                returnReviewModal.style.display = 'none';
+                returnReviewModal.classList.remove('show');
+            }
+            
+            // Show penalty preview modal with flex display for proper centering
+            penaltyPreviewModal.style.display = 'flex';
+            // Prevent body scroll when modal is open
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closePenaltyPreview() {
+            penaltyPreviewModal.style.display = 'none';
+            pendingPenaltyData = null;
+            
+            // Show return review modal again if user cancels
+            if (returnReviewModal && activeReturnReview) {
+                returnReviewModal.style.display = 'flex';
+                returnReviewModal.classList.add('show');
+                // Keep body scroll locked since return review modal is open
+            } else {
+                // Restore body scroll only if not returning to review modal
+                document.body.style.overflow = '';
             }
         }
-        
-        // Sidebar toggle functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            const sidebarToggle = document.getElementById('sidebarToggle');
-            const sidebar = document.getElementById('sidebar');
-            const adminContainer = document.querySelector('.admin-container');
-            
-            if (sidebarToggle && sidebar && adminContainer) {
-                sidebarToggle.addEventListener('click', function() {
-                    const isHidden = sidebar.classList.toggle('hidden');
-                    adminContainer.classList.toggle('sidebar-hidden', isHidden);
-                });
+
+        function proceedToPenalty() {
+            if (!pendingPenaltyData) return;
+
+            // Build URL with query parameters
+            const params = new URLSearchParams({
+                action: 'create_damage_penalty',
+                transaction_id: pendingPenaltyData.transaction_id,
+                equipment_name: pendingPenaltyData.equipment_name,
+                student_id: pendingPenaltyData.student_id,
+                detected_issues: pendingPenaltyData.detected_issues,
+                similarity_score: pendingPenaltyData.similarity_score,
+                severity_level: pendingPenaltyData.severity_level,
+                from_transaction: '1'
+            });
+
+            window.location.href = `admin-penalty-management.php?${params.toString()}`;
+        }
+
+        // Event listeners for penalty preview modal
+        if (penaltyPreviewClose) {
+            penaltyPreviewClose.addEventListener('click', closePenaltyPreview);
+        }
+        if (penaltyPreviewCancel) {
+            penaltyPreviewCancel.addEventListener('click', closePenaltyPreview);
+        }
+        if (penaltyPreviewProceed) {
+            penaltyPreviewProceed.addEventListener('click', proceedToPenalty);
+        }
+
+        // Close penalty preview modal when clicking outside
+        window.addEventListener('click', (event) => {
+            if (event.target === penaltyPreviewModal) {
+                closePenaltyPreview();
             }
-            
+        });
+
+        // Sidebar toggle functionality handled by sidebar component
+        document.addEventListener('DOMContentLoaded', function() {
             // Start polling for analyzing transactions
             startPollingForAnalyzing();
         });

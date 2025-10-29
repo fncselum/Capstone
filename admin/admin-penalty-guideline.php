@@ -78,8 +78,24 @@ if ($table_exists) {
     }
 }
 
-// Get penalty types for filter
-$penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
+// Get penalty types for filter (based on client policy)
+$default_penalty_types = ['Late Return', 'Damage', 'Loss'];
+$penalty_types = $default_penalty_types;
+
+if ($table_exists) {
+    $type_result = $conn->query("SELECT DISTINCT penalty_type FROM penalty_guidelines ORDER BY penalty_type ASC");
+    if ($type_result) {
+        $custom_types = [];
+        while ($row = $type_result->fetch_assoc()) {
+            $type = trim($row['penalty_type']);
+            if ($type !== '' && !in_array($type, $default_penalty_types, true) && !in_array($type, $custom_types, true)) {
+                $custom_types[] = $type;
+            }
+        }
+        sort($custom_types, SORT_NATURAL | SORT_FLAG_CASE);
+        $penalty_types = array_merge($default_penalty_types, $custom_types);
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -93,57 +109,40 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
 </head>
 <body>
     <div class="admin-container">
-        <!-- Sidebar -->
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <img src="../uploads/De lasalle ASMC.png" alt="De La Salle ASMC Logo" class="main-logo" style="height:30px; width:auto;">
-                    <span class="logo-text">Admin Panel</span>
-                </div>
-                <button class="sidebar-toggle" id="sidebarToggle">
-                    <i class="fas fa-bars"></i>
-                </button>
-            </div>
-            
-            <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="admin-dashboard.php"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-equipment-inventory.php"><i class="fas fa-boxes"></i><span>Equipment Inventory</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="reports.php"><i class="fas fa-file-alt"></i><span>Reports</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-all-transaction.php"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
-                </li>
-                <li class="nav-item active">
-                    <a href="admin-penalty-guideline.php"><i class="fas fa-exclamation-triangle"></i><span>Penalty Guidelines</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-management.php"><i class="fas fa-gavel"></i><span>Penalty Management</span></a>
-                </li>
-            </ul>
-
-            <div class="sidebar-footer">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
-                </button>
-            </div>
-        </nav>
+        <?php include 'includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">
             <header class="top-header">
                 <h1 class="page-title">Penalty Guidelines Management</h1>
+                <p class="page-subtitle">Define penalty rules based on Instructional Media Center policy</p>
                 <button class="add-btn" onclick="openAddModal()">
                     <i class="fas fa-plus"></i> Add Penalty Guideline
                 </button>
             </header>
+
+            <!-- Policy Info Box -->
+            <div class="policy-info-box">
+                <div class="policy-header">
+                    <i class="fas fa-info-circle"></i>
+                    <h3>Penalties from the Office of the Instructional Media Center</h3>
+                </div>
+                <div class="policy-content">
+                    <div class="policy-item">
+                        <strong>Overdue:</strong> ₱10.00 per day (to be reviewed if Saturday and Sunday are included)
+                    </div>
+                    <div class="policy-item">
+                        <strong>Damaged Item:</strong> To be repaired by the borrower
+                    </div>
+                    <div class="policy-item">
+                        <strong>Lost Item:</strong> Replace the lost item with the same unit
+                    </div>
+                    <div class="policy-note">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>Note:</strong> This system does NOT process payments. It only tracks and displays penalty amounts owed by students. Payment collection is handled separately by the office.
+                    </div>
+                </div>
+            </div>
 
             <?php if ($success_message): ?>
                 <div class="alert alert-success">
@@ -250,7 +249,7 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
                                     </div>
                                     <div class="info-row">
                                         <span class="label">Amount:</span>
-                                        <span class="value">₱<?= number_format($guideline['penalty_amount'], 2) ?></span>
+                                        <span class="value amount-highlight">₱<?= number_format($guideline['penalty_amount'], 2) ?></span>
                                     </div>
                                     <div class="info-row">
                                         <span class="label">Points:</span>
@@ -321,12 +320,12 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
                     
                     <div class="form-group">
                         <label for="penalty_type">Penalty Type *</label>
-                        <select id="penalty_type" name="penalty_type" required>
-                            <option value="">Select Type</option>
+                        <input list="penaltyTypeOptions" id="penalty_type" name="penalty_type" required placeholder="Type or select penalty type">
+                        <datalist id="penaltyTypeOptions">
                             <?php foreach($penalty_types as $type): ?>
-                                <option value="<?= htmlspecialchars($type) ?>"><?= htmlspecialchars($type) ?></option>
+                                <option value="<?= htmlspecialchars($type) ?>">
                             <?php endforeach; ?>
-                        </select>
+                        </datalist>
                     </div>
                 </div>
                 
@@ -334,13 +333,17 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
                     <div class="form-group">
                         <label for="penalty_amount">Penalty Amount (₱) *</label>
                         <input type="number" id="penalty_amount" name="penalty_amount" step="0.01" min="0" required>
+                        <small class="form-hint">Amount to be paid by student (for tracking only - no payment processing)</small>
                     </div>
                     
                     <div class="form-group">
                         <label for="penalty_points">Penalty Points *</label>
                         <input type="number" id="penalty_points" name="penalty_points" min="0" required>
+                        <small class="form-hint">Accumulated points for tracking violations</small>
                     </div>
                 </div>
+
+                <div id="policyGuidance" class="policy-guidance"></div>
                 
                 <div class="form-group">
                     <label for="penalty_description">Description *</label>
@@ -385,6 +388,21 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
         </div>
     </div>
 
+    <!-- Printable Guideline Container -->
+    <div id="printContainer" class="print-container" aria-hidden="true">
+        <div class="print-content">
+            <header class="print-header">
+                <h1>Instructional Media Center</h1>
+                <h2>Penalty Guideline</h2>
+            </header>
+            <section class="print-body" id="printBody"></section>
+            <footer class="print-footer">
+                <p class="print-note">This document is generated for reference only. Payments are handled separately by the IMC office.</p>
+                <p class="print-timestamp">Generated on <span id="printTimestamp"></span></p>
+            </footer>
+        </div>
+    </div>
+
     <script>
         function logout() {
             localStorage.clear();
@@ -392,19 +410,8 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
             window.location.href = 'logout.php';
         }
 
-        // Sidebar toggle
+        // Sidebar toggle functionality handled by sidebar component
         document.addEventListener('DOMContentLoaded', function() {
-            const sidebarToggle = document.getElementById('sidebarToggle');
-            const sidebar = document.getElementById('sidebar');
-            const adminContainer = document.querySelector('.admin-container');
-            
-            if (sidebarToggle && sidebar && adminContainer) {
-                sidebarToggle.addEventListener('click', function() {
-                    const isHidden = sidebar.classList.toggle('hidden');
-                    adminContainer.classList.toggle('sidebar-hidden', isHidden);
-                });
-            }
-
             // Search functionality
             const searchInput = document.getElementById('searchInput');
             let searchTimeout;
@@ -421,6 +428,7 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
             document.getElementById('guidelineForm').reset();
             document.getElementById('guidelineId').value = '';
             document.getElementById('guidelineModal').style.display = 'block';
+            applyPolicyTemplate();
         }
 
         function closeModal() {
@@ -505,6 +513,7 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
                         document.getElementById('penalty_description').value = g.penalty_description;
                         document.getElementById('status').value = g.status;
                         document.getElementById('guidelineModal').style.display = 'block';
+                        applyPolicyTemplate(false);
                     }
                 })
                 .catch(error => console.error('Error:', error));
@@ -529,8 +538,48 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
             }
         }
 
-        function printGuideline(id) {
-            window.open(`print_penalty_guideline.php?id=${id}`, '_blank');
+        async function printGuideline(id) {
+            try {
+                const response = await fetch(`get_penalty_guideline.php?id=${id}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    alert('Unable to load guideline for printing.');
+                    return;
+                }
+
+                const g = data.guideline;
+                const printBody = document.getElementById('printBody');
+                const timestamp = document.getElementById('printTimestamp');
+
+                const detailsHtml = `
+                    <div class="print-section">
+                        <h3>${g.title}</h3>
+                        <dl>
+                            <div><dt>Penalty Type</dt><dd>${g.penalty_type}</dd></div>
+                            <div><dt>Penalty Amount</dt><dd>₱${parseFloat(g.penalty_amount).toFixed(2)}</dd></div>
+                            <div><dt>Penalty Points</dt><dd>${g.penalty_points} pts</dd></div>
+                            <div><dt>Status</dt><dd>${g.status}</dd></div>
+                            <div><dt>Created</dt><dd>${g.created_at}</dd></div>
+                            <div><dt>Updated</dt><dd>${g.updated_at}</dd></div>
+                        </dl>
+                        <h4>Description</h4>
+                        <p>${g.penalty_description.replace(/\n/g, '<br>')}</p>
+                        ${g.document_path ? `<p><strong>Supporting Document:</strong> ${g.document_path}</p>` : ''}
+                    </div>
+                `;
+
+                printBody.innerHTML = detailsHtml;
+                timestamp.textContent = new Date().toLocaleString();
+
+                document.body.classList.add('printing');
+                window.print();
+            } catch (error) {
+                console.error('Print error:', error);
+                alert('An error occurred while preparing the print view.');
+            } finally {
+                document.body.classList.remove('printing');
+            }
         }
 
         function exportToPDF() {
@@ -552,6 +601,90 @@ $penalty_types = ['Late Return', 'Damage', 'Loss', 'Misuse', 'Other'];
                 closeViewModal();
             }
         }
+
+        const penaltyPolicyTemplates = {
+            'Late Return': {
+                title: 'Overdue Equipment Daily Fee',
+                amount: 10.00,
+                amountDisabled: true,
+                points: 0,
+                description: 'Applies when borrowed equipment is returned beyond the expected return date. Students are charged ₱10.00 for each day late. Inclusion of Saturdays and Sundays should be reviewed by the IMC in-charge.',
+                guidance: `
+                    <h4>Late Return Policy</h4>
+                    <ul>
+                        <li>Fixed charge of ₱10.00 per day overdue.</li>
+                        <li>System tracks amount owed; payment is collected manually at the IMC office.</li>
+                        <li>Confirm with the in-charge if weekends are included before issuing the penalty.</li>
+                    </ul>
+                `
+            },
+            'Damage': {
+                title: 'Damaged Equipment - Borrower Repair Requirement',
+                amount: 0.00,
+                amountDisabled: true,
+                points: 0,
+                description: 'When equipment is returned with damage, the borrower is responsible for repairing it. Record the required repair actions and estimated cost in the notes when issuing the penalty.',
+                guidance: `
+                    <h4>Damaged Item Policy</h4>
+                    <ul>
+                        <li>Borrower must shoulder repair cost and coordinate repair.</li>
+                        <li>Use penalty notes to document damage details and repair instructions.</li>
+                        <li>No fixed amount—set actual expense during penalty assessment.</li>
+                    </ul>
+                `
+            },
+            'Loss': {
+                title: 'Lost Equipment Replacement',
+                amount: 0.00,
+                amountDisabled: true,
+                points: 0,
+                description: 'If an item is lost, the borrower must replace it with the same unit. Use notes to specify the required model and any deadlines for replacement.',
+                guidance: `
+                    <h4>Lost Item Policy</h4>
+                    <ul>
+                        <li>Borrower must purchase and provide the exact same unit.</li>
+                        <li>Record item model and replacement deadline in penalty notes.</li>
+                        <li>Set replacement value during penalty issuance for tracking.</li>
+                    </ul>
+                `
+            }
+        };
+
+        function applyPolicyTemplate(resetTitle = true) {
+            const typeSelect = document.getElementById('penalty_type');
+            const selectedType = typeSelect.value;
+            const template = penaltyPolicyTemplates[selectedType];
+            const amountInput = document.getElementById('penalty_amount');
+            const pointsInput = document.getElementById('penalty_points');
+            const descriptionInput = document.getElementById('penalty_description');
+            const guidanceBox = document.getElementById('policyGuidance');
+
+            if (!template) {
+                amountInput.removeAttribute('readonly');
+                amountInput.classList.remove('input-readonly');
+                guidanceBox.innerHTML = '';
+                return;
+            }
+
+            if (resetTitle) {
+                document.getElementById('title').value = template.title;
+            }
+
+            amountInput.value = template.amount.toFixed(2);
+            pointsInput.value = template.points;
+            descriptionInput.value = template.description;
+            guidanceBox.innerHTML = template.guidance;
+
+            if (template.amountDisabled) {
+                amountInput.setAttribute('readonly', 'readonly');
+                amountInput.classList.add('input-readonly');
+            } else {
+                amountInput.removeAttribute('readonly');
+                amountInput.classList.remove('input-readonly');
+            }
+        }
+
+        document.getElementById('penalty_type').addEventListener('change', () => applyPolicyTemplate());
     </script>
 </body>
 </html>

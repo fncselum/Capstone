@@ -101,20 +101,23 @@ if (!in_array($stock_filter, $allowed_filters)) {
     $stock_filter = 'all';
 }
 
-// Build SQL query with stock filter
+// Build SQL query with stock filter and maintenance count
 $sql = "SELECT e.*, e.size_category, c.name as category_name, 
         e.quantity as quantity,
-        i.borrowed_quantity, i.item_condition, i.availability_status, i.minimum_stock_level,
-        GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available
+        i.available_quantity, i.borrowed_quantity, i.damaged_quantity, i.item_condition, i.availability_status, i.minimum_stock_level,
+        COALESCE(i.available_quantity, GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0)) AS computed_available,
+        (SELECT COUNT(*) FROM maintenance_logs ml 
+         WHERE ml.equipment_id = e.rfid_tag 
+         AND ml.status IN ('Pending', 'In Progress')) AS maintenance_count
         FROM equipment e 
         LEFT JOIN categories c ON e.category_id = c.id 
         LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id";
 
 // Add WHERE clause for stock filtering
 if ($stock_filter === 'available') {
-    $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) > 0";
+    $sql .= " WHERE COALESCE(i.available_quantity, GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0)) > 0";
 } elseif ($stock_filter === 'out_of_stock') {
-    $sql .= " WHERE GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) = 0";
+    $sql .= " WHERE COALESCE(i.available_quantity, GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0)) = 0";
 }
 
 $sql .= " ORDER BY e.name";
@@ -145,48 +148,7 @@ $hasEquipment = !empty($equipment_items);
 </head>
 <body>
     <div class="admin-container">
-        <!-- Sidebar -->
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                <img src="../uploads/De lasalle ASMC.png" alt="De La Salle ASMC Logo" class="main-logo" style="height:30px; width:auto;">
-                <span class="logo-text">Admin Panel</span>
-                </div>
-                <button class="sidebar-toggle" id="sidebarToggle">
-                    <i class="fas fa-bars"></i>
-                </button>
-            </div>
-            
-            <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="admin-dashboard.php"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-                </li>
-                <li class="nav-item active">
-                    <a href="admin-equipment-inventory.php"><i class="fas fa-boxes"></i><span>Equipment Inventory</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="reports.php"><i class="fas fa-file-alt"></i><span>Reports</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-all-transaction.php"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-guideline.php"><i class="fas fa-exclamation-triangle"></i><span>Penalty Guidelines</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-management.php"><i class="fas fa-gavel"></i><span>Penalty Management</span></a>
-                </li>
-            </ul>
-
-            <div class="sidebar-footer">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
-                </button>
-            </div>
-        </nav>
+        <?php include 'includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">
@@ -269,19 +231,32 @@ $hasEquipment = !empty($equipment_items);
                                             </div>
                                         <?php endif; ?>
                                         <?php 
-                                            // Always display quantity from equipment table
+                                            // Total quantity from equipment table
                                             $equipment_qty = $row['quantity'] ?? 0;
-                                            // Compute available from quantity - borrowed
-                                            $computed_available = max(($row['quantity'] ?? 0) - ($row['borrowed_quantity'] ?? 0), 0);
+                                            $maintenance_count = $row['maintenance_count'] ?? 0;
+                                            // Compute available from query
+                                            $computed_available = $row['computed_available'] ?? 0;
                                             $min_stock = $row['minimum_stock_level'] ?? 1;
-                                            $is_out_of_stock = ($computed_available == 0);
+                                            $is_not_available = ($computed_available == 0);
                                             $is_low_stock = ($computed_available > 0 && $computed_available <= $min_stock);
                                         ?>
-                                        <div class="equipment-qty">
-                                            Quantity: <span data-available-quantity><?= htmlspecialchars($equipment_qty) ?></span>
-                                            <span class="stock-badge <?= $is_out_of_stock ? 'out-of-stock' : ($is_low_stock ? 'low-stock' : 'available') ?>" data-availability-status>
-                                                <?= $is_out_of_stock ? 'Out of Stock' : ($is_low_stock ? 'Low Stock' : 'Available') ?>
-                                            </span>
+                                        <div class="equipment-qty-container">
+                                            <div class="equipment-qty-row">
+                                                Quantity: <span class="qty-value"><?= htmlspecialchars($equipment_qty) ?></span>
+                                            </div>
+                                            <div class="equipment-qty-row">
+                                                Available: <span class="qty-value" data-available-quantity><?= htmlspecialchars($computed_available) ?></span>
+                                                <span class="stock-badge <?= $is_not_available ? 'out-of-stock' : ($is_low_stock ? 'low-stock' : 'available') ?>" data-availability-status>
+                                                    <?= $is_not_available ? 'Not Available' : ($is_low_stock ? 'Low Stock' : 'Available') ?>
+                                                </span>
+                                            </div>
+                                            <?php if ($maintenance_count > 0): ?>
+                                            <div class="equipment-qty-breakdown">
+                                                <span class="qty-badge maintenance" title="Ongoing maintenance (Pending + In Progress)">
+                                                    <i class="fas fa-wrench"></i> <?= $maintenance_count ?> Maintenance
+                                                </span>
+                                            </div>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                     <div class="card-actions">
@@ -479,17 +454,7 @@ $hasEquipment = !empty($equipment_items);
             // Initial filter
             filterEquipment();
             
-            // Sidebar toggle functionality
-            const sidebarToggle = document.getElementById('sidebarToggle');
-            const sidebar = document.getElementById('sidebar');
-            const adminContainer = document.querySelector('.admin-container');
-            
-            if (sidebarToggle && sidebar && adminContainer) {
-                sidebarToggle.addEventListener('click', function() {
-                    const isHidden = sidebar.classList.toggle('hidden');
-                    adminContainer.classList.toggle('sidebar-hidden', isHidden);
-                });
-            }
+            // Sidebar toggle functionality handled by sidebar component
         });
         
         // Logout function

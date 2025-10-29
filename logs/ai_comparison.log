@@ -1,0 +1,6 @@
+[2025-10-26 16:10:55] [DEBUG] Executing AI comparison: C:\Users\Rosa Maria Elum\AppData\Local\Programs\Python\Python314\python.exe "C:\xampp\htdocs\Capstone\includes/../ai/compare_images.py" "C:\xampp\htdocs\Capstone\uploads/mouse_1759904806.jpg" "C:\xampp\htdocs\Capstone\uploads/transaction_photos/1760942742_45.jpg" 2>&1
+[2025-10-26 16:10:55] [DEBUG] AI execution completed in 0.11914896965027s
+[2025-10-26 16:10:55] [DEBUG] Executing AI comparison: C:\Users\Rosa Maria Elum\AppData\Local\Programs\Python\Python314\python.exe "C:\xampp\htdocs\Capstone\includes/../ai/compare_images.py" "C:\xampp\htdocs\Capstone\uploads/mouse_1759904806.jpg" "C:\xampp\htdocs\Capstone\uploads/transaction_photos/1760935341_44.jpg" 2>&1
+[2025-10-26 16:10:55] [DEBUG] AI execution completed in 0.076136112213135s
+[2025-10-26 16:10:55] [DEBUG] Executing AI comparison: C:\Users\Rosa Maria Elum\AppData\Local\Programs\Python\Python314\python.exe "C:\xampp\htdocs\Capstone\includes/../ai/compare_images.py" "C:\xampp\htdocs\Capstone\uploads/mouse_1759904806.jpg" "C:\xampp\htdocs\Capstone\uploads/transaction_photos/1760934659_43.jpg" 2>&1
+[2025-10-26 16:10:55] [DEBUG] AI execution completed in 0.08262300491333s

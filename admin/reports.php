@@ -195,45 +195,7 @@ usort($equipmentSummaryList, function($a, $b) {
 </head>
 <body>
     <div class="admin-container">
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <img src="../uploads/De lasalle ASMC.png" alt="De La Salle ASMC Logo" class="main-logo" style="height:30px; width:auto;">
-                    <span class="logo-text">Admin Panel</span>
-                </div>
-                <button class="sidebar-toggle" id="sidebarToggle">
-                    <i class="fas fa-bars"></i>
-                </button>
-            </div>
-            <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="admin-dashboard.php"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-equipment-inventory.php"><i class="fas fa-boxes"></i><span>Equipment Inventory</span></a>
-                </li>
-                <li class="nav-item active">
-                    <a href="reports.php"><i class="fas fa-file-alt"></i><span>Reports</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-all-transaction.php"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-guideline.php"><i class="fas fa-exclamation-triangle"></i><span>Penalty Guidelines</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-management.php"><i class="fas fa-gavel"></i><span>Penalty Management</span></a>
-                </li>
-            </ul>
-            <div class="sidebar-footer no-print">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
-                </button>
-            </div>
-        </nav>
+        <?php include 'includes/sidebar.php'; ?>
 
         <main class="main-content">
             <header class="top-header" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
@@ -391,19 +353,7 @@ usort($equipmentSummaryList, function($a, $b) {
             window.location.href = 'logout.php';
         }
         
-        // Sidebar toggle functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            const sidebarToggle = document.getElementById('sidebarToggle');
-            const sidebar = document.getElementById('sidebar');
-            const adminContainer = document.querySelector('.admin-container');
-            
-            if (sidebarToggle && sidebar && adminContainer) {
-                sidebarToggle.addEventListener('click', function() {
-                    const isHidden = sidebar.classList.toggle('hidden');
-                    adminContainer.classList.toggle('sidebar-hidden', isHidden);
-                });
-            }
-        });
+        // Sidebar toggle functionality handled by sidebar component
     </script>
 </body>
 </html>

@@ -104,48 +104,7 @@ if ($has_transactions) {
 </head>
 <body>
     <div class="admin-container">
-        <!-- Sidebar -->
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <img src="../uploads/De lasalle ASMC.png" alt="De La Salle ASMC Logo" class="main-logo" style="height:30px; width:auto;">
-                    <span class="logo-text">Admin Panel</span>
-                </div>
-                <button class="sidebar-toggle" id="sidebarToggle">
-                    <i class="fas fa-bars"></i>
-                </button>
-            </div>
-            
-            <ul class="nav-menu">
-                <li class="nav-item">
-                    <a href="admin-dashboard.php"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-equipment-inventory.php"><i class="fas fa-boxes"></i><span>Equipment Inventory</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="reports.php"><i class="fas fa-file-alt"></i><span>Reports</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-all-transaction.php"><i class="fas fa-exchange-alt"></i><span>All Transactions</span></a>
-                </li>
-                <li class="nav-item active">
-                    <a href="admin-user-activity.php"><i class="fas fa-users"></i><span>User Activity</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-guideline.php"><i class="fas fa-exclamation-triangle"></i><span>Penalty Guidelines</span></a>
-                </li>
-                <li class="nav-item">
-                    <a href="admin-penalty-management.php"><i class="fas fa-gavel"></i><span>Penalty Management</span></a>
-                </li>
-            </ul>
-
-            <div class="sidebar-footer">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> <span>Logout</span>
-                </button>
-            </div>
-        </nav>
+        <?php include 'includes/sidebar.php'; ?>
 
         <!-- Main -->
         <main class="main-content">
@@ -224,15 +183,7 @@ if ($has_transactions) {
             window.location.href = 'logout.php';
         }
         
-        // Sidebar toggle functionality
-        const sidebarToggle = document.getElementById('sidebarToggle');
-        const sidebar = document.getElementById('sidebar');
-        
-        if (sidebarToggle) {
-            sidebarToggle.addEventListener('click', function() {
-                sidebar.classList.toggle('collapsed');
-            });
-        }
+        // Sidebar toggle functionality handled by sidebar component
         
         // Animate bars on load
         document.addEventListener('DOMContentLoaded', function() {

@@ -427,7 +427,7 @@ if ($db_connected) {
 									}
 								}
 							}
-						} else {
+
 							$severityLevel = 'high';
 							$verificationStatus = 'Pending';
 							$reviewStatus = 'Review Required';

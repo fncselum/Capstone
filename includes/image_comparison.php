@@ -13,6 +13,21 @@ if (!function_exists('compareReturnToReference')) {
      * @param array $options Configuration options
      * @return array Comparison results with similarity score and detected issues
      */
+    function normalizeIssueMessage(string $message): string {
+        $clean = trim($message);
+        if ($clean === '') {
+            return $clean;
+        }
+
+        // Remove legacy "(Method: hybrid)" or similar suffixes
+        $clean = preg_replace('/\s*\(method\s*[:\-]?\s*hybrid\)\.?/i', '', $clean);
+
+        // Collapse repeated whitespace
+        $clean = preg_replace('/\s+/u', ' ', $clean);
+
+        return trim($clean);
+    }
+
     function compareReturnToReference(string $referencePath, string $returnPath, array $options = []): array {
         $defaults = [
             'resize' => 300,
@@ -23,6 +38,38 @@ if (!function_exists('compareReturnToReference')) {
         ];
         $config = array_merge($defaults, $options);
         $warnings = [];
+
+        $itemSize = strtolower((string)($config['item_size'] ?? 'medium'));
+        if ($itemSize === 'large') {
+            return [
+                'success' => true,
+                'similarity' => null,
+                'ssim_score' => null,
+                'phash_score' => null,
+                'pixel_score' => null,
+                'pixel_difference_score' => null,
+                'hist_score' => null,
+                'histogram_score' => null,
+                'edge_diff_pct' => null,
+                'edge_difference_pct' => null,
+                'gradient_score' => null,
+                'object_presence_score' => null,
+                'confidence_band' => 'low',
+                'detected_issues_text' => 'Manual review required (large item).',
+                'detected_issues_list' => ['Manual review required (large item).'],
+                'severity_level' => 'medium',
+                'method_used' => 'skipped',
+                'warnings' => ['Large item skipped automatic comparison'],
+                'raw_scores' => null,
+                'metadata' => [
+                    'reference_path' => basename($referencePath),
+                    'return_path' => basename($returnPath),
+                    'item_size' => $itemSize,
+                    'timestamp' => date('Y-m-d H:i:s'),
+                    'version' => '2.0',
+                ],
+            ];
+        }
 
         // Check GD extension
         if (!extension_loaded('gd')) {
@@ -83,11 +130,14 @@ if (!function_exists('compareReturnToReference')) {
         $referenceStats = calculateLuminanceStats($referenceImage);
         $returnStats = calculateLuminanceStats($returnImage);
 
-        $targetMean = ($referenceStats['mean'] + $returnStats['mean']) / 2;
-        $targetStd = max(25.0, min(90.0, ($referenceStats['stddev'] + $returnStats['stddev']) / 2));
+        // Two-pass normalization to avoid dimming good reference when return is blank
+        $targetRefMean = $referenceStats['mean'];
+        $targetRefStd = max(25.0, min(90.0, $referenceStats['stddev']));
+        adjustImageLuminance($referenceImage, $targetRefMean, $targetRefStd, $referenceStats);
 
-        adjustImageLuminance($referenceImage, $targetMean, $targetStd, $referenceStats);
-        adjustImageLuminance($returnImage, $targetMean, $targetStd, $returnStats);
+        $targetRetMean = ($referenceStats['mean']);
+        $targetRetStd = max(20.0, min(80.0, $returnStats['stddev']));
+        adjustImageLuminance($returnImage, $targetRetMean, $targetRetStd, $returnStats);
 
         // Calculate similarity scores
         $ssimScore = computeSSIMScore($referenceImage, $returnImage) * 100;
@@ -131,7 +181,9 @@ if (!function_exists('compareReturnToReference')) {
         $combined = max(0, min(100, $combined));
 
         // Apply hard penalty if object appears missing or completely different
-        if ($objectPresenceScore < 40.0 && $edgeDiffPct > 0.25) {
+        if ($objectPresenceScore < 28.0) {
+            $combined = min($combined, 30.0);
+        } elseif ($objectPresenceScore < 40.0 && $edgeDiffPct > 0.25) {
             $combined = min($combined, 35.0);
         }
 
@@ -153,7 +205,7 @@ if (!function_exists('compareReturnToReference')) {
 
         // Additional detail cues
         if ($combined < 50) {
-            if ($objectPresenceScore < 40.0) {
+            if ($objectPresenceScore < 45.0) {
                 $detailMessages[] = 'Object structure not recognized';
             }
             if ($edgeDiffPct > 0.18 && $gradientSimilarity < 70) {
@@ -178,6 +230,9 @@ if (!function_exists('compareReturnToReference')) {
         }
 
         $detectedIssuesList = array_merge([$baseMessage], $detailMessages);
+        $detectedIssuesList = array_values(array_filter(array_map('normalizeIssueMessage', $detectedIssuesList), static function ($msg) {
+            return $msg !== '';
+        }));
         $detectedIssuesText = implode("\n", array_map(static function ($message) {
             $trimmed = trim($message);
             if ($trimmed === '') {
@@ -962,8 +1017,13 @@ if (!function_exists('compareReturnToReference')) {
         $edgeDensity2 = $edgeCount2 / $totalPixels;
 
         // If one image has very few edges (blank/blurry) and the other has many, object is likely missing
+        if ($edgeDensity1 < 0.01 && $edgeDensity2 < 0.01) {
+            // Both images are nearly blank; treat as poor object presence
+            return 0.05;
+        }
+
         if ($edgeDensity1 < 0.02 || $edgeDensity2 < 0.02) {
-            return min($edgeDensity1, $edgeDensity2) / max(0.001, max($edgeDensity1, $edgeDensity2)) * 100;
+            return min($edgeDensity1, $edgeDensity2) / max(0.001, max($edgeDensity1, $edgeDensity2));
         }
 
         // Compare edge density ratio
