@@ -161,6 +161,9 @@ if ($result) {
 
         .section-header {
             margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .section-header h2 {
@@ -275,22 +278,29 @@ if ($result) {
         }
 
         .refresh-btn {
-            padding: 10px 20px;
+            padding: 8px 16px;
             background: #9c27b0;
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            transition: background 0.3s ease;
+            gap: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            white-space: nowrap;
         }
 
         .refresh-btn:hover {
             background: #7b1fa2;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(156, 39, 176, 0.3);
+        }
+
+        .refresh-btn i {
+            font-size: 0.9rem;
         }
 
         /* Equipment Overview */
