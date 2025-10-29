@@ -1487,7 +1487,6 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 </div>
                 <div class="return-review-buttons">
                     <button type="button" class="approval-btn approve-btn" data-review-action="verify">Mark Verified</button>
-                    <button type="button" class="approval-btn flag-btn" data-review-action="flag">Flag for Review</button>
                     <button type="button" class="approval-btn penalty-btn" data-review-action="add_penalty">
                         <i class="fas fa-gavel"></i> Add to Penalty
                     </button>
@@ -1740,7 +1739,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             
             resetReturnReviewNotes();
             if (returnReviewModal) {
+                returnReviewModal.style.display = 'flex';
                 returnReviewModal.classList.add('show');
+                document.body.style.overflow = 'hidden';
             }
         }
 
@@ -1786,6 +1787,19 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             }
             activeReturnReview = null;
             document.body.style.overflow = '';
+            document.body.style.pointerEvents = '';
+            
+            // Reset notes and errors
+            if (returnReviewNotes) {
+                returnReviewNotes.value = '';
+            }
+            if (returnReviewError) {
+                returnReviewError.textContent = '';
+                returnReviewError.style.display = 'none';
+            }
+            if (returnReviewNotesContainer) {
+                returnReviewNotesContainer.style.display = 'none';
+            }
         }
 
         function handleReturnReviewButton(action) {
@@ -1793,7 +1807,7 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 return;
             }
             if (returnReviewNotesContainer) {
-                if (action === 'flag' || action === 'add_penalty') {
+                if (action === 'add_penalty') {
                     returnReviewNotesContainer.style.display = 'flex';
                 } else {
                     returnReviewNotesContainer.style.display = 'none';
@@ -1892,7 +1906,8 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             statusBadgeEl.classList.add(info.class);
         }
 
-        document.addEventListener('click', (event) => {
+        // Use event delegation on the table body for better reliability
+        function handleReviewButtonClick(event) {
             const reviewTrigger = event.target.closest('[data-return-review]');
             if (reviewTrigger) {
                 event.preventDefault();
@@ -1928,6 +1943,17 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 populateReturnReview(parsed);
                 return;
             }
+        }
+        
+        // Attach to both document and table for reliability
+        document.addEventListener('click', handleReviewButtonClick);
+        const transactionsTable = document.getElementById('transactionsTable');
+        if (transactionsTable) {
+            transactionsTable.addEventListener('click', handleReviewButtonClick);
+        }
+        
+        // Handle modal background click
+        document.addEventListener('click', (event) => {
             if (event.target === returnReviewModal) {
                 closeReturnReviewModal();
             }
@@ -1959,27 +1985,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 return;
             }
             
-            let notes = '';
-            const requiresNotes = action === 'flag';
-            if (requiresNotes && returnReviewNotesContainer) {
-                returnReviewNotesContainer.style.display = 'flex';
-            }
-            if (requiresNotes) {
-                notes = (returnReviewNotes?.value || '').trim();
-                if (!notes) {
-                    if (returnReviewError) {
-                        returnReviewError.textContent = 'Please provide notes before flagging this return.';
-                        returnReviewError.style.display = 'block';
-                    }
-                    if (returnReviewNotes) {
-                        returnReviewNotes.focus();
-                    }
-                    return;
-                }
-            } else {
-                if (returnReviewNotesContainer) {
-                    returnReviewNotesContainer.style.display = 'none';
-                }
+            // Notes are only shown for add_penalty action
+            if (returnReviewNotesContainer) {
+                returnReviewNotesContainer.style.display = 'none';
             }
             if (returnReviewError) {
                 returnReviewError.textContent = '';
@@ -1991,14 +1999,6 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             payload.append('action', action);
             
             // System auto-detects issues - no manual input needed
-            
-            // Add notes for flag action
-            if (action === 'flag' && returnReviewNotes) {
-                const notes = returnReviewNotes.value.trim();
-                if (notes) {
-                    payload.append('notes', notes);
-                }
-            }
 
             try {
                 setReturnReviewButtonsDisabled(true);

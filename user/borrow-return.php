@@ -128,7 +128,7 @@ if (!$conn->connect_error) {
 
         <!-- Footer -->
         <div class="footer">
-            <p>&copy; <?= date('Y') ?> De La Salle Araneta University. All rights reserved.</p>
+            <p>&copy; <?= date('Y') ?> De La Salle Andres Soriano Memorial College (ASMC). All rights reserved.</p>
         </div>
     </div>
 

@@ -106,59 +106,11 @@ function showStatus(message, type) {
     }
 }
 
-// Toggle manual input form
-function toggleManualInput() {
-    console.log('Manual Entry button clicked!'); // Debug log
-    const manualForm = document.getElementById('manualInputForm');
-    const manualInput = document.getElementById('manualRfidInput');
-    
-    if (manualForm && manualInput) {
-        if (manualForm.style.display === 'none' || manualForm.style.display === '') {
-            manualForm.style.display = 'flex';
-            manualInput.focus();
-            console.log('Manual input form opened');
-        } else {
-            manualForm.style.display = 'none';
-            const rfidInput = document.getElementById('rfidInput');
-            if (rfidInput) rfidInput.focus();
-            console.log('Manual input form closed');
-        }
-    } else {
-        console.error('Manual input elements not found');
-    }
-}
-
-// Submit manual RFID
-function submitManualRfid() {
-    const manualInput = document.getElementById('manualRfidInput');
-    const rfidValue = manualInput.value.trim();
-    
-    if (rfidValue) {
-        processRFID(rfidValue);
-        manualInput.value = '';
-    } else {
-        showStatus('Please enter an RFID or Student ID', 'error');
-    }
-}
-
-// Handle Enter key in manual input
-document.addEventListener('DOMContentLoaded', function() {
-    const manualInput = document.getElementById('manualRfidInput');
-    if (manualInput) {
-        manualInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitManualRfid();
-            }
-        });
-    }
-});
-
 // Prevent form submission on Enter (for accessibility)
 document.addEventListener('keypress', function(e) {
     if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
         const activeElement = document.activeElement;
-        if (activeElement.id === 'rfidInput' || activeElement.id === 'manualRfidInput') {
+        if (activeElement.id === 'rfidInput') {
             e.preventDefault();
         }
     }

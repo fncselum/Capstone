@@ -739,8 +739,19 @@ if ($db_connected) {
 		});
 	}
 
-	// Refresh every 5 seconds
-	setInterval(refreshEquipmentList, 5000);
+	// Scroll detection for sticky header shadow effect
+	window.addEventListener('scroll', function() {
+		const header = document.querySelector('.borrow-header');
+		const filterBar = document.querySelector('.category-filter-bar');
+		
+		if (window.scrollY > 10) {
+			header.classList.add('scrolled');
+			if (filterBar) filterBar.classList.add('scrolled');
+		} else {
+			header.classList.remove('scrolled');
+			if (filterBar) filterBar.classList.remove('scrolled');
+		}
+	});
 
 	// Auto-logout after 5 minutes
 	let inactivityTime = function () {

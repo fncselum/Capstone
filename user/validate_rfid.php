@@ -56,20 +56,24 @@ $result = $stmt->get_result();
 if ($result->num_rows > 0) {
     $user = $result->fetch_assoc();
     
-    // Check if user is suspended
-    if ($user['status'] === 'Suspended') {
+    // Only allow Active users
+    if ($user['status'] !== 'Active') {
+        $statusMessage = '';
+        switch ($user['status']) {
+            case 'Suspended':
+                $statusMessage = 'Your account is suspended. Please contact the administrator.';
+                break;
+            case 'Inactive':
+                $statusMessage = 'Your account is inactive. Please contact the administrator.';
+                break;
+            default:
+                $statusMessage = 'Your account status does not allow access. Please contact the administrator.';
+                break;
+        }
+        
         echo json_encode([
             'success' => false,
-            'message' => 'Your account is suspended. Please contact the administrator.'
-        ]);
-        exit;
-    }
-    
-    // Check if user is inactive
-    if ($user['status'] === 'Inactive') {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Your account is inactive. Please contact the administrator.'
+            'message' => $statusMessage
         ]);
         exit;
     }
@@ -103,45 +107,11 @@ if ($result->num_rows > 0) {
         'penalty_points' => $user['penalty_points'] ?? 0
     ]);
 } else {
-    // User not found - Auto-register new RFID
-    $new_student_id = $rfid; // Use RFID as student ID initially
-    $status = 'Active';
-    $penalty_points = 0;
-    
-    // Insert new user
-    $insert_stmt = $conn->prepare("INSERT INTO users (rfid_tag, student_id, status, penalty_points, registered_at) 
-                                   VALUES (?, ?, ?, ?, NOW())");
-    $insert_stmt->bind_param("sssi", $rfid, $new_student_id, $status, $penalty_points);
-    
-    if ($insert_stmt->execute()) {
-        $new_user_id = $insert_stmt->insert_id;
-        
-        // Store new user info in session
-        $_SESSION['user_id'] = $new_user_id;
-        $_SESSION['rfid_tag'] = $rfid;
-        $_SESSION['student_id'] = $new_student_id;
-        $_SESSION['is_admin'] = false;
-        $_SESSION['admin_level'] = 'user';
-        $_SESSION['penalty_points'] = 0;
-        
-        echo json_encode([
-            'success' => true,
-            'message' => 'Welcome! RFID registered successfully.',
-            'is_admin' => false,
-            'admin_level' => 'user',
-            'user_id' => $new_user_id,
-            'student_id' => $new_student_id,
-            'penalty_points' => 0,
-            'new_user' => true
-        ]);
-    } else {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Error registering RFID. Please try again.'
-        ]);
-    }
-    
-    $insert_stmt->close();
+    // User not found - Reject unauthorized access
+    echo json_encode([
+        'success' => false,
+        'message' => 'RFID not authorized. Please contact the administrator to register your account.'
+    ]);
 }
 
 $stmt->close();

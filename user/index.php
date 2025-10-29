@@ -43,21 +43,8 @@ session_start();
                     <h2 class="scanner-title">Ready to Scan</h2>
                     <p class="scanner-instruction">Place your RFID card near the scanner</p>
                     
-                    <!-- Hidden RFID Input -->
+                    <!-- Hidden RFID Input (Auto-scan only) -->
                     <input type="text" id="rfidInput" class="rfid-input" autocomplete="off" autofocus>
-                    
-                    <!-- Manual Input Option -->
-                    <button class="manual-input-btn" onclick="toggleManualInput()">
-                        <i class="fas fa-keyboard"></i> Manual Entry
-                    </button>
-                    
-                    <!-- Manual Input Form (Hidden by default) -->
-                    <div id="manualInputForm" class="manual-input-form" style="display: none;">
-                        <input type="text" id="manualRfidInput" placeholder="Enter RFID or Student ID" class="manual-rfid-field">
-                        <button onclick="submitManualRfid()" class="submit-manual-btn">
-                            <i class="fas fa-arrow-right"></i> Submit
-                        </button>
-                    </div>
                     
                     <!-- Status Message -->
                     <div id="statusMessage" class="status-message"></div>
@@ -102,7 +89,7 @@ session_start();
 
         <!-- Footer -->
         <div class="footer">
-            <p>&copy; <?= date('Y') ?> De La Salle Araneta University. All rights reserved.</p>
+            <p>&copy; <?= date('Y') ?> De La Salle Andres Soriano Memorial College (ASMC). All rights reserved.</p>
         </div>
     </div>
 
