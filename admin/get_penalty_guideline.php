@@ -23,7 +23,9 @@ if ($conn->connect_error) {
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 if ($id > 0) {
-    $sql = "SELECT pg.*, au.username as created_by_name 
+    $sql = "SELECT pg.id, pg.title, pg.penalty_type, pg.penalty_description, pg.penalty_amount, 
+                   pg.penalty_points, pg.document_file, pg.status, pg.created_by, 
+                   pg.created_at, pg.updated_at, au.username as created_by_name 
             FROM penalty_guidelines pg
             LEFT JOIN admin_users au ON pg.created_by = au.id
             WHERE pg.id = ?";

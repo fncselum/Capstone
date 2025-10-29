@@ -23,6 +23,14 @@ $filter_type = isset($_GET['type']) ? $_GET['type'] : 'all';
 $filter_status = isset($_GET['status']) ? $_GET['status'] : 'all';
 $search_query = isset($_GET['search']) ? trim($_GET['search']) : '';
 
+$back_params = [
+    'type' => $filter_type,
+    'status' => $filter_status,
+    'search' => $search_query,
+];
+$back_query = http_build_query($back_params);
+$back_link = 'admin-penalty-guideline.php' . ($back_query ? '?' . $back_query : '');
+
 // Build SQL query with filters
 $sql = "SELECT pg.*, au.username as created_by_name 
         FROM penalty_guidelines pg
@@ -205,10 +213,10 @@ $guidelines = $conn->query($sql);
             }
         }
         
-        .print-btn {
+        .print-btn,
+        .back-btn {
             position: fixed;
             top: 20px;
-            right: 20px;
             padding: 12px 24px;
             background: #1e5631;
             color: white;
@@ -219,13 +227,29 @@ $guidelines = $conn->query($sql);
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
             z-index: 1000;
         }
-        
-        .print-btn:hover {
+
+        .print-btn {
+            right: 20px;
+        }
+
+        .back-btn {
+            left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #555;
+        }
+
+        .print-btn:hover,
+        .back-btn:hover {
             background: #163f24;
         }
     </style>
 </head>
 <body>
+    <button class="back-btn no-print" onclick="window.location.href='<?= htmlspecialchars($back_link) ?>'">
+        ← Back to Guidelines
+    </button>
     <button class="print-btn no-print" onclick="window.print()">
         🖨️ Print / Save as PDF
     </button>

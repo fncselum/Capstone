@@ -24,8 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
     
     if ($id > 0) {
-        // Get document path before deleting
-        $sql = "SELECT document_path FROM penalty_guidelines WHERE id = ?";
+        // Get document file before deleting
+        $sql = "SELECT document_file FROM penalty_guidelines WHERE id = ?";
         $stmt = $conn->prepare($sql);
         $stmt->bind_param("i", $id);
         $stmt->execute();
@@ -39,8 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($stmt->execute()) {
             // Delete associated file if exists
-            if ($guideline && $guideline['document_path']) {
-                $file_path = dirname(__DIR__) . '/' . $guideline['document_path'];
+            if ($guideline && !empty($guideline['document_file'])) {
+                $relativePath = ltrim($guideline['document_file'], '/\\');
+                $file_path = dirname(__DIR__) . '/' . $relativePath;
                 if (file_exists($file_path)) {
                     @unlink($file_path);
                 }

@@ -162,7 +162,7 @@ class PenaltySystem
     public function getGuidelineById(int $guidelineId): ?array
     {
         $query = $this->conn->prepare(
-            "SELECT id, title AS guideline_name, penalty_type, penalty_amount, penalty_points, penalty_description, document_path, status 
+            "SELECT id, title AS guideline_name, penalty_type, penalty_amount, penalty_points, penalty_description, document_file, status 
              FROM penalty_guidelines 
              WHERE id = ? AND status = 'active'"
         );

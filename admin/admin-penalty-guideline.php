@@ -120,29 +120,6 @@ if ($table_exists) {
                 </button>
             </header>
 
-            <!-- Policy Info Box -->
-            <div class="policy-info-box">
-                <div class="policy-header">
-                    <i class="fas fa-info-circle"></i>
-                    <h3>Penalties from the Office of the Instructional Media Center</h3>
-                </div>
-                <div class="policy-content">
-                    <div class="policy-item">
-                        <strong>Overdue:</strong> ₱10.00 per day (to be reviewed if Saturday and Sunday are included)
-                    </div>
-                    <div class="policy-item">
-                        <strong>Damaged Item:</strong> To be repaired by the borrower
-                    </div>
-                    <div class="policy-item">
-                        <strong>Lost Item:</strong> Replace the lost item with the same unit
-                    </div>
-                    <div class="policy-note">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <strong>Note:</strong> This system does NOT process payments. It only tracks and displays penalty amounts owed by students. Payment collection is handled separately by the office.
-                    </div>
-                </div>
-            </div>
-
             <?php if ($success_message): ?>
                 <div class="alert alert-success">
                     <i class="fas fa-check-circle"></i> <?= htmlspecialchars($success_message) ?>
@@ -183,7 +160,7 @@ if ($table_exists) {
   `penalty_description` TEXT NOT NULL,
   `penalty_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   `penalty_points` INT NOT NULL DEFAULT 0,
-  `document_path` VARCHAR(255) DEFAULT NULL,
+  `document_file` VARCHAR(255) DEFAULT NULL,
   `status` ENUM('draft', 'active', 'archived') DEFAULT 'draft',
   `created_by` INT DEFAULT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -258,10 +235,13 @@ if ($table_exists) {
                                         <?= nl2br(htmlspecialchars(substr($guideline['penalty_description'], 0, 150))) ?>
                                         <?= strlen($guideline['penalty_description']) > 150 ? '...' : '' ?>
                                     </div>
-                                    <?php if ($guideline['document_path']): ?>
+                                    <?php if (!empty($guideline['document_file'])): ?>
+                                        <?php $documentUrl = '../' . ltrim($guideline['document_file'], '/\\'); ?>
                                         <div class="document-link">
                                             <i class="fas fa-paperclip"></i>
-                                            <a href="<?= htmlspecialchars($guideline['document_path']) ?>" target="_blank">View Document</a>
+                                            <a href="<?= htmlspecialchars($documentUrl) ?>" download="<?= htmlspecialchars(basename($guideline['document_file'])) ?>" target="_blank">
+                                                <?= htmlspecialchars(basename($guideline['document_file'])) ?>
+                                            </a>
                                         </div>
                                     <?php endif; ?>
                                 </div>
@@ -351,16 +331,21 @@ if ($table_exists) {
                 
                 <div class="form-group">
                     <label for="document">Supporting Document (PDF, DOCX, Images)</label>
-                    <div id="currentDocumentInfo" style="display: none; margin-bottom: 10px; padding: 10px; background: #f8faf9; border-radius: 6px; border-left: 3px solid #1e5631;">
-                        <small style="color: #555;">
-                            <i class="fas fa-file"></i> <strong>Current:</strong> 
-                            <a id="currentDocumentLink" href="#" target="_blank" style="color: #1e5631; text-decoration: none;">View Document</a>
+                    <div id="currentDocumentInfo" style="display: none; margin-bottom: 10px; padding: 12px; background: #f8faf9; border-radius: 6px; border-left: 3px solid #1e5631;">
+                        <div style="margin-bottom: 6px; color: #333;">
+                            <i class="fas fa-file-alt" style="color: #1e5631;"></i>
+                            <strong>Current Document:</strong>
+                        </div>
+                        <div style="margin-left: 20px; display: inline-flex; align-items: center; gap: 6px; color: #1e5631; font-weight: 500;">
+                            <i class="fas fa-paperclip"></i>
+                            <span id="currentDocumentName"></span>
+                        </div>
+                        <small style="color: #999; font-style: italic; display: block; margin-top: 4px;">
+                            <i class="fas fa-info-circle"></i> Upload a new file below to replace the current document
                         </small>
-                        <br>
-                        <small style="color: #999; font-style: italic;">Upload a new file to replace the current document</small>
                     </div>
                     <input type="file" id="document" name="document" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png">
-                    <small>Max file size: 5MB</small>
+                    <small style="color: #666;">Max file size: 5MB. Allowed: PDF, DOC, DOCX, JPG, PNG</small>
                 </div>
                 
                 <div class="form-group">
@@ -428,6 +413,27 @@ if ($table_exists) {
                     applyFilters();
                 }, 500);
             });
+
+            // File input change handler - show selected filename
+            const documentInput = document.getElementById('document');
+            if (documentInput) {
+                documentInput.addEventListener('change', function(e) {
+                    const currentDocInfo = document.getElementById('currentDocumentInfo');
+                    if (e.target.files.length > 0) {
+                        const newFileName = e.target.files[0].name;
+                        const fileSize = (e.target.files[0].size / 1024 / 1024).toFixed(2);
+                        
+                        // Show info about the new file being uploaded
+                        if (currentDocInfo && currentDocInfo.style.display !== 'none') {
+                            const infoText = currentDocInfo.querySelector('small[style*="font-style: italic"]');
+                            if (infoText) {
+                                infoText.innerHTML = `<i class="fas fa-upload"></i> <strong>New file selected:</strong> ${newFileName} (${fileSize} MB) - Will replace current document on save`;
+                                infoText.style.color = '#2e7d32';
+                            }
+                        }
+                    }
+                });
+            }
         });
 
         function openAddModal() {
@@ -466,7 +472,9 @@ if ($table_exists) {
                 .then(data => {
                     if (data.success) {
                         const g = data.guideline;
-                        const hasDoc = g.document_path && String(g.document_path).trim() !== '';
+                        const docPath = g.document_file ? String(g.document_file).trim() : '';
+                        const docUrl = docPath ? ('../' + docPath.replace(/^[/\\]+/, '')) : '';
+                        const hasDoc = !!docUrl;
                         document.getElementById('viewContent').innerHTML = `
                             <div class="view-details">
                                 <h3>${g.title}</h3>
@@ -489,12 +497,18 @@ if ($table_exists) {
                                     <p>${g.penalty_description.replace(/\n/g, '<br>')}</p>
                                 </div>
                                 ${hasDoc ? `
-                                    <div class="detail-document">
-                                        <strong>Document:</strong>
-                                        <button type="button" class="btn-link" onclick="openDocument('${g.document_path.replace(/"/g, '\\"')}')">
-                                            <i class="fas fa-paperclip"></i> View Document
-                                        </button>
-                                        <div id="documentPreview" style="margin-top:12px;"></div>
+                                    <div class="detail-document" style="margin-top: 20px; padding: 15px; background: #f8faf9; border-radius: 8px; border-left: 4px solid #1e5631;">
+                                        <div style="margin-bottom: 12px;">
+                                            <strong style="color: #1e5631; font-size: 1.05em;">
+                                                <i class="fas fa-file-alt"></i> Supporting Document
+                                            </strong>
+                                        </div>
+                                        <div style="padding: 10px;">
+                                            <a href="${docUrl}" download="${docPath.split('/').pop()}" style="display: inline-flex; align-items: center; color: #1e5631; text-decoration: none; font-weight: 500; font-size: 1em; transition: all 0.2s;">
+                                                <i class="fas fa-paperclip" style="margin-right: 8px; color: #1e5631;"></i>
+                                                <span style="border-bottom: 1px solid transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='#1e5631'" onmouseout="this.style.borderColor='transparent'">${docPath.split('/').pop()}</span>
+                                            </a>
+                                        </div>
                                     </div>
                                 ` : `
                                     <div class="detail-document">
@@ -563,10 +577,13 @@ if ($table_exists) {
                         
                         // Show current document if exists
                         const currentDocInfo = document.getElementById('currentDocumentInfo');
-                        const currentDocLink = document.getElementById('currentDocumentLink');
-                        if (g.document_path) {
-                            currentDocLink.href = g.document_path;
-                            currentDocLink.textContent = g.document_path.split('/').pop();
+                        const currentDocName = document.getElementById('currentDocumentName');
+                        const docPathEdit = g.document_file ? String(g.document_file).trim() : '';
+                        const docUrlEdit = docPathEdit ? ('../' + docPathEdit.replace(/^[/\\]+/, '')) : '';
+                        
+                        if (docUrlEdit) {
+                            const filename = docPathEdit.split('/').pop();
+                            currentDocName.textContent = filename;
                             currentDocInfo.style.display = 'block';
                         } else {
                             currentDocInfo.style.display = 'none';
@@ -625,7 +642,6 @@ if ($table_exists) {
                         </dl>
                         <h4>Description</h4>
                         <p>${g.penalty_description.replace(/\n/g, '<br>')}</p>
-                        ${g.document_path ? `<p><strong>Supporting Document:</strong> ${g.document_path}</p>` : ''}
                     </div>
                 `;
 
@@ -643,11 +659,12 @@ if ($table_exists) {
         }
 
         function exportToPDF() {
-            window.open('export_penalty_guidelines_pdf.php?' + new URLSearchParams({
+            const query = new URLSearchParams({
                 type: document.getElementById('typeFilter').value,
                 status: document.getElementById('statusFilter').value,
                 search: document.getElementById('searchInput').value
-            }), '_blank');
+            });
+            window.location.href = 'export_penalty_guidelines_pdf.php?' + query.toString();
         }
 
         // Close modals on outside click

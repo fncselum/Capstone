@@ -232,13 +232,6 @@ if ($id > 0) {
             <p><?= nl2br(htmlspecialchars($guideline['penalty_description'])) ?></p>
         </div>
         
-        <?php if ($guideline['document_path']): ?>
-        <div class="info-section">
-            <strong>Supporting Document:</strong>
-            <p><?= htmlspecialchars(basename($guideline['document_path'])) ?></p>
-        </div>
-        <?php endif; ?>
-        
         <div class="footer">
             <p>Created by: <?= htmlspecialchars($guideline['created_by_name'] ?? 'Unknown') ?></p>
             <p>Created: <?= date('F d, Y', strtotime($guideline['created_at'])) ?></p>

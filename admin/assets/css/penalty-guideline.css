@@ -3,9 +3,18 @@
 /* ===== Page Layout ===== */
 .top-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 16px;
     margin-bottom: 24px;
+}
+
+.top-header .page-title {
+    margin: 0;
+    flex: 1 1 auto;
+}
+
+.top-header .add-btn {
+    margin-left: auto;
 }
 
 .page-subtitle {

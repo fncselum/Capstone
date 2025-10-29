@@ -37,17 +37,17 @@ if (empty($title) || empty($penalty_type) || empty($penalty_description)) {
 }
 
 // Handle file upload
-$document_path = null;
-$old_document_path = null;
+$document_file = null;
+$old_document_file = null;
 
-// If updating, get the old document path
+// If updating, get the old document file
 if ($id) {
-    $stmt = $conn->prepare("SELECT document_path FROM penalty_guidelines WHERE id = ?");
+    $stmt = $conn->prepare("SELECT document_file FROM penalty_guidelines WHERE id = ?");
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($row = $result->fetch_assoc()) {
-        $old_document_path = $row['document_path'];
+        $old_document_file = $row['document_file'];
     }
     $stmt->close();
 }
@@ -83,17 +83,32 @@ if (isset($_FILES['document']) && $_FILES['document']['error'] === UPLOAD_ERR_OK
         mkdir($upload_dir, 0755, true);
     }
     
-    // Generate unique filename
-    $unique_filename = 'penalty_' . time() . '_' . uniqid() . '.' . $file_ext;
-    $upload_path = $upload_dir . $unique_filename;
+    // Sanitize original filename to prevent security issues
+    $original_filename = preg_replace('/[^a-zA-Z0-9._-]/', '_', pathinfo($file_name, PATHINFO_FILENAME));
+    $safe_filename = $original_filename . '.' . $file_ext;
+    
+    // Check if file already exists, add timestamp prefix if needed
+    $final_filename = $safe_filename;
+    $upload_path = $upload_dir . $final_filename;
+    
+    // If file exists, prepend timestamp to make it unique
+    if (file_exists($upload_path)) {
+        $final_filename = time() . '_' . $safe_filename;
+        $upload_path = $upload_dir . $final_filename;
+    }
     
     // Move uploaded file
     if (move_uploaded_file($file_tmp, $upload_path)) {
-        $document_path = 'uploads/penalty_documents/' . $unique_filename;
+        $document_file = 'uploads/penalty_documents/' . $final_filename;
+        $document_file = str_replace('\\', '/', $document_file);
         
         // Delete old document if exists and new one uploaded successfully
-        if ($old_document_path && file_exists('../' . $old_document_path)) {
-            unlink('../' . $old_document_path);
+        if ($old_document_file) {
+            $oldRelative = ltrim($old_document_file, '/\\');
+            $oldPath = dirname(__DIR__) . '/' . $oldRelative;
+            if (file_exists($oldPath)) {
+                unlink($oldPath);
+            }
         }
     } else {
         echo json_encode(['success' => false, 'message' => 'Failed to upload document.']);
@@ -104,7 +119,7 @@ if (isset($_FILES['document']) && $_FILES['document']['error'] === UPLOAD_ERR_OK
 // Prepare SQL query
 if ($id) {
     // UPDATE existing guideline
-    if ($document_path) {
+    if ($document_file) {
         // Update with new document
         $stmt = $conn->prepare(
             "UPDATE penalty_guidelines 
@@ -113,7 +128,7 @@ if ($id) {
                  penalty_description = ?, 
                  penalty_amount = ?, 
                  penalty_points = ?, 
-                 document_path = ?, 
+                 document_file = ?, 
                  status = ?, 
                  updated_at = NOW() 
              WHERE id = ?"
@@ -125,7 +140,7 @@ if ($id) {
             $penalty_description,
             $penalty_amount,
             $penalty_points,
-            $document_path,
+            $document_file,
             $status,
             $id
         );
@@ -165,7 +180,7 @@ if ($id) {
     // INSERT new guideline
     $stmt = $conn->prepare(
         "INSERT INTO penalty_guidelines 
-         (title, penalty_type, penalty_description, penalty_amount, penalty_points, document_path, status, created_by, created_at, updated_at) 
+         (title, penalty_type, penalty_description, penalty_amount, penalty_points, document_file, status, created_by, created_at, updated_at) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())"
     );
     $stmt->bind_param(
@@ -175,7 +190,7 @@ if ($id) {
         $penalty_description,
         $penalty_amount,
         $penalty_points,
-        $document_path,
+        $document_file,
         $status,
         $admin_id
     );
