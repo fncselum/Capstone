@@ -1,4 +1,6 @@
 <?php
+// Include notification helper
+require_once __DIR__ . '/../includes/notification_helper.php';
 
 class PenaltySystem
 {
@@ -153,6 +155,19 @@ class PenaltySystem
                 $updateTxn->bind_param('ii', $penaltyId, $transactionId);
                 $updateTxn->execute();
                 $updateTxn->close();
+            }
+        }
+
+        // Create notification for penalty issued
+        if ($penaltyId) {
+            $student_id = $borrowerIdentifier ?: ($userId ? "User #{$userId}" : 'Unknown');
+            notifyPenaltyIssued($this->conn, $student_id, $penaltyType, $penaltyAmount);
+            
+            // Additional notifications based on penalty type
+            if ($penaltyType === 'Damage' && $equipmentName) {
+                notifyDamagedEquipment($this->conn, $equipmentName, $student_id, $damageNotes ?: 'Damage detected');
+            } elseif ($penaltyType === 'Loss' && $equipmentName) {
+                notifyLostEquipment($this->conn, $equipmentName, $student_id);
             }
         }
 

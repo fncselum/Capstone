@@ -2,6 +2,9 @@
 session_start();
 header('Content-Type: application/json');
 
+// Include notification helper
+require_once __DIR__ . '/../includes/notification_helper.php';
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -173,6 +176,14 @@ try {
     $update->close();
 
     $conn->commit();
+
+    // Create notification for return verification
+    if ($action === 'verify') {
+        $student_id = $transaction['user_id'] ?? 'Unknown';
+        $equipment_name = $transaction['equipment_name'] ?? 'Equipment';
+        $condition = ($severityLevel === 'none' || $severityLevel === 'minor') ? 'Good' : 'Damaged';
+        notifyReturnVerified($conn, $equipment_name, $student_id, $condition);
+    }
 
     echo json_encode([
         'success' => true,

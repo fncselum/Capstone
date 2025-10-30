@@ -216,11 +216,13 @@ $current_page = basename($_SERVER['PHP_SELF']);
         position: fixed;
         left: 0;
         top: 0;
-        overflow-y: auto;
+        overflow-y: hidden;
         overflow-x: hidden;
         transition: transform 0.3s ease;
         z-index: 1000;
         box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
     }
 
     .sidebar.hidden {
@@ -243,31 +245,32 @@ $current_page = basename($_SERVER['PHP_SELF']);
     }
 
     .sidebar-header {
-        padding: 20px;
+        padding: 12px 16px;
         border-bottom: 1px solid rgba(255,255,255,0.1);
         display: flex;
         justify-content: space-between;
         align-items: center;
+        flex-shrink: 0;
     }
 
     .logo-container {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
     }
 
     .logo-container .main-logo {
-        height: 30px;
+        height: 26px;
         width: auto;
     }
 
     .logo-container i {
-        font-size: 1.5rem;
+        font-size: 1.3rem;
         color: #4caf50;
     }
 
     .logo-text {
-        font-size: 1.1rem;
+        font-size: 0.95rem;
         font-weight: 600;
     }
 
@@ -287,24 +290,27 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
     .nav-menu {
         list-style: none;
-        padding: 10px 0;
+        padding: 6px 0;
         margin: 0;
+        flex: 1;
+        overflow-y: auto;
     }
 
     .nav-item {
-        margin: 4px 0;
+        margin: 2px 0;
     }
 
     .nav-item > a,
     .submenu-toggle {
         display: flex;
         align-items: center;
-        padding: 12px 20px;
+        padding: 10px 16px;
         color: rgba(255,255,255,0.8);
         text-decoration: none;
         transition: all 0.3s;
         cursor: pointer;
         border-left: 3px solid transparent;
+        font-size: 0.9rem;
     }
 
     .nav-item > a:hover,
@@ -321,14 +327,14 @@ $current_page = basename($_SERVER['PHP_SELF']);
     }
 
     .nav-item i {
-        width: 24px;
-        margin-right: 12px;
-        font-size: 1.1rem;
+        width: 20px;
+        margin-right: 10px;
+        font-size: 1rem;
     }
 
     .submenu-arrow {
         margin-left: auto;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         transition: transform 0.3s;
     }
 
@@ -357,11 +363,11 @@ $current_page = basename($_SERVER['PHP_SELF']);
     .submenu a {
         display: flex;
         align-items: center;
-        padding: 12px 20px 12px 56px;
+        padding: 9px 16px 9px 46px;
         color: rgba(255,255,255,0.65);
         text-decoration: none;
         transition: all 0.2s;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         border-left: 3px solid transparent;
     }
 
@@ -384,14 +390,15 @@ $current_page = basename($_SERVER['PHP_SELF']);
     }
 
     .sidebar-footer {
-        padding: 20px;
+        padding: 12px 16px;
         border-top: 1px solid rgba(255,255,255,0.1);
         margin-top: auto;
+        flex-shrink: 0;
     }
 
     .logout-btn {
         width: 100%;
-        padding: 12px;
+        padding: 10px;
         background: rgba(244, 67, 54, 0.2);
         border: 1px solid rgba(244, 67, 54, 0.5);
         color: white;
@@ -400,14 +407,16 @@ $current_page = basename($_SERVER['PHP_SELF']);
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 10px;
+        gap: 8px;
         transition: all 0.3s;
-        font-size: 1rem;
+        font-size: 0.9rem;
+        font-weight: 500;
     }
 
     .logout-btn:hover {
         background: rgba(244, 67, 54, 0.3);
         border-color: #f44336;
+        transform: translateY(-1px);
     }
 
     /* Responsive */

@@ -38,10 +38,117 @@ if ($conn->connect_error) {
     $db_error = $conn->connect_error;
 }
 
-// Fetch data from DB
+// Fetch comprehensive dashboard data
+$stats = [
+    'total_equipment' => 0,
+    'active_borrows' => 0,
+    'total_returns' => 0,
+    'pending_returns' => 0,
+    'total_users' => 0,
+    'total_penalties' => 0,
+    'overdue_items' => 0,
+    'available_equipment' => 0
+];
+
+$recent_transactions = [];
+$recent_penalties = [];
+$low_stock_items = [];
+$top_borrowed = [];
+
 if ($db_connected) {
-    // Database connection is established
-    // Individual section files will handle their own data queries
+    // Total Equipment
+    $result = $conn->query("SELECT COUNT(*) as count FROM equipment");
+    if ($result) $stats['total_equipment'] = $result->fetch_assoc()['count'];
+    
+    // Active Borrows (status = 'Active')
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active' AND transaction_type = 'Borrow'");
+    if ($result) $stats['active_borrows'] = $result->fetch_assoc()['count'];
+    
+    // Total Returns
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_type = 'Return'");
+    if ($result) $stats['total_returns'] = $result->fetch_assoc()['count'];
+    
+    // Pending Returns (status = 'Pending Review')
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Pending Review'");
+    if ($result) $stats['pending_returns'] = $result->fetch_assoc()['count'];
+    
+    // Total Users
+    $result = $conn->query("SELECT COUNT(*) as count FROM users");
+    if ($result) $stats['total_users'] = $result->fetch_assoc()['count'];
+    
+    // Total Penalties
+    $result = $conn->query("SELECT COUNT(*) as count FROM penalties WHERE status = 'Pending'");
+    if ($result) $stats['total_penalties'] = $result->fetch_assoc()['count'];
+    
+    // Overdue Items
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active' AND expected_return_date < CURDATE()");
+    if ($result) $stats['overdue_items'] = $result->fetch_assoc()['count'];
+    
+    // Available Equipment (quantity > 0)
+    $result = $conn->query("SELECT COUNT(*) as count FROM equipment WHERE quantity > 0");
+    if ($result) $stats['available_equipment'] = $result->fetch_assoc()['count'];
+    
+    // Recent Transactions (last 10)
+    $result = $conn->query("
+        SELECT t.*, u.student_id, e.name as equipment_name, e.rfid_tag
+        FROM transactions t
+        LEFT JOIN users u ON t.user_id = u.id
+        LEFT JOIN equipment e ON t.equipment_id = e.id
+        ORDER BY t.transaction_date DESC
+        LIMIT 10
+    ");
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $recent_transactions[] = $row;
+        }
+    }
+    
+    // Recent Penalties (last 5)
+    $result = $conn->query("
+        SELECT p.*, u.student_id, e.name as equipment_name
+        FROM penalties p
+        LEFT JOIN users u ON p.user_id = u.id
+        LEFT JOIN equipment e ON p.equipment_id = e.id
+        ORDER BY p.created_at DESC
+        LIMIT 5
+    ");
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $recent_penalties[] = $row;
+        }
+    }
+    
+    // Low Stock Items (quantity <= 5)
+    $result = $conn->query("
+        SELECT id, name, rfid_tag, quantity, category
+        FROM equipment
+        WHERE quantity <= 5 AND quantity > 0
+        ORDER BY quantity ASC
+        LIMIT 5
+    ");
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $low_stock_items[] = $row;
+        }
+    }
+    
+    // Top 5 Borrowed Equipment (this month)
+    $result = $conn->query("
+        SELECT e.name, e.rfid_tag, COUNT(*) as borrow_count
+        FROM transactions t
+        JOIN equipment e ON t.equipment_id = e.id
+        WHERE t.transaction_type = 'Borrow'
+        AND MONTH(t.transaction_date) = MONTH(CURDATE())
+        AND YEAR(t.transaction_date) = YEAR(CURDATE())
+        GROUP BY t.equipment_id
+        ORDER BY borrow_count DESC
+        LIMIT 5
+    ");
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $top_borrowed[] = $row;
+        }
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -166,9 +273,140 @@ if ($db_connected) {
                             </div>
                         </div>
 
-                        
+                        <!-- New Enhanced Statistics Cards -->
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-number"><?= number_format($stats['total_users']) ?></h3>
+                                <p class="stat-label">Total Users</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-gavel"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-number"><?= number_format($stats['total_penalties']) ?></h3>
+                                <p class="stat-label">Pending Penalties</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-number"><?= number_format($stats['overdue_items']) ?></h3>
+                                <p class="stat-label">Overdue Items</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-number"><?= number_format($stats['available_equipment']) ?></h3>
+                                <p class="stat-label">Available Equipment</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Recent Activities Section -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 30px;">
+                    <!-- Recent Transactions -->
+                    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08);">
+                        <h3 style="margin-bottom: 15px; color: #006633; font-weight: 700;">
+                            <i class="fas fa-exchange-alt"></i> Recent Transactions
+                        </h3>
+                        <?php if (!empty($recent_transactions)): ?>
+                            <div style="max-height: 400px; overflow-y: auto;">
+                                <?php foreach ($recent_transactions as $trans): ?>
+                                    <div style="padding: 12px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <div style="font-weight: 600; color: #333;">
+                                                <?= htmlspecialchars($trans['equipment_name'] ?? 'N/A') ?>
+                                            </div>
+                                            <div style="font-size: 0.85rem; color: #666;">
+                                                Student: <?= htmlspecialchars($trans['student_id'] ?? 'N/A') ?>
+                                            </div>
+                                            <div style="font-size: 0.8rem; color: #999;">
+                                                <?= date('M j, Y H:i', strtotime($trans['transaction_date'])) ?>
+                                            </div>
+                                        </div>
+                                        <span style="padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; 
+                                            <?= $trans['transaction_type'] === 'Borrow' ? 'background: #e3f2fd; color: #2196f3;' : 'background: #e8f5e9; color: #4caf50;' ?>">
+                                            <?= htmlspecialchars($trans['transaction_type']) ?>
+                                        </span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php else: ?>
+                            <p style="text-align: center; color: #999; padding: 40px 0;">No recent transactions</p>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Low Stock Alerts -->
+                    <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08);">
+                        <h3 style="margin-bottom: 15px; color: #ff9800; font-weight: 700;">
+                            <i class="fas fa-exclamation-triangle"></i> Low Stock Alert
+                        </h3>
+                        <?php if (!empty($low_stock_items)): ?>
+                            <div>
+                                <?php foreach ($low_stock_items as $item): ?>
+                                    <div style="padding: 12px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <div style="font-weight: 600; color: #333;">
+                                                <?= htmlspecialchars($item['name']) ?>
+                                            </div>
+                                            <div style="font-size: 0.85rem; color: #666;">
+                                                RFID: <?= htmlspecialchars($item['rfid_tag']) ?>
+                                            </div>
+                                        </div>
+                                        <span style="padding: 6px 12px; border-radius: 12px; font-size: 0.85rem; font-weight: 700;
+                                            <?= $item['quantity'] <= 2 ? 'background: #ffebee; color: #f44336;' : 'background: #fff3e0; color: #ff9800;' ?>">
+                                            <?= $item['quantity'] ?> left
+                                        </span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php else: ?>
+                            <p style="text-align: center; color: #999; padding: 40px 0;">All items well stocked</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <!-- Top Borrowed This Month -->
+                <?php if (!empty($top_borrowed)): ?>
+                <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 15px; color: #006633; font-weight: 700;">
+                        <i class="fas fa-trophy"></i> Top 5 Borrowed This Month
+                    </h3>
+                    <div>
+                        <?php foreach ($top_borrowed as $index => $item): ?>
+                            <div style="padding: 12px; border-bottom: 1px solid #f0f0f0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <div>
+                                        <span style="font-weight: 700; color: #006633; margin-right: 10px;">#<?= $index + 1 ?></span>
+                                        <span style="font-weight: 600; color: #333;"><?= htmlspecialchars($item['name']) ?></span>
+                                        <span style="font-size: 0.85rem; color: #666; margin-left: 10px;">
+                                            (<?= htmlspecialchars($item['rfid_tag']) ?>)
+                                        </span>
+                                    </div>
+                                    <span style="font-weight: 700; color: #006633;"><?= $item['borrow_count'] ?> borrows</span>
+                                </div>
+                                <div style="background: #f0f0f0; height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="background: linear-gradient(90deg, #006633, #00994d); height: 100%; width: <?= min(100, ($item['borrow_count'] / $top_borrowed[0]['borrow_count']) * 100) ?>%; transition: width 0.3s ease;"></div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
                 
                 <div id="dashboard-content">
                     <?php
