@@ -74,13 +74,12 @@ class PenaltySystem
                 damage_severity,
                 damage_notes,
                 description,
-                notes,
                 status,
                 imposed_by,
                 date_imposed,
                 created_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, NOW(), NOW(), NOW())"
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, NOW(), NOW(), NOW())"
         );
 
         if (!$stmt) {
@@ -89,7 +88,7 @@ class PenaltySystem
         }
 
         $stmt->bind_param(
-            'iiisssddsidssssi',
+            'iiisssddsidsssi',
             $userId,
             $transactionId,
             $guidelineId,
@@ -104,7 +103,6 @@ class PenaltySystem
             $damageSeverity,
             $damageNotes,
             $description,
-            $notes,
             $adminId
         );
 
@@ -139,22 +137,6 @@ class PenaltySystem
                 );
                 $assessment->execute();
                 $assessment->close();
-            }
-        }
-
-        // Update transaction status to indicate penalty has been issued
-        if ($penaltyId && $transactionId) {
-            $updateTxn = $this->conn->prepare(
-                "UPDATE transactions 
-                 SET return_verification = 'Penalty Issued',
-                     penalty_id = ?
-                 WHERE id = ?"
-            );
-            
-            if ($updateTxn) {
-                $updateTxn->bind_param('ii', $penaltyId, $transactionId);
-                $updateTxn->execute();
-                $updateTxn->close();
             }
         }
 
@@ -416,8 +398,9 @@ class PenaltySystem
                     p.status,
                     p.date_imposed,
                     p.date_resolved,
-                    p.resolution_type,
-                    p.resolution_notes,
+                    p.resolved_by,
+                    p.description,
+                    p.damage_notes,
                     da.similarity_score,
                     da.detected_issues
                 FROM penalties p
