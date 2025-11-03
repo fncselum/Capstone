@@ -276,7 +276,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             if ($penaltySystem->createPenalty($payload)) {
-                $success_message = "Penalty record created successfully.";
+                $_SESSION['success_message'] = "Penalty record created successfully.";
+                header('Location: admin-penalty-management.php');
+                exit;
             } else {
                 $error_message = "Failed to create penalty. Please verify the details.";
             }
@@ -341,10 +343,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
             <header class="top-header">
                 <h1 class="page-title">Penalty Management</h1>
                 <div class="header-actions">
-                    <a href="admin-all-transaction.php" class="btn btn-secondary">
-                        <i class="fas fa-arrow-left"></i>
-                        Back to Transactions
-                    </a>
                 </div>
             </header>
 
