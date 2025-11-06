@@ -343,6 +343,9 @@ $stats = $penaltySystem->getPenaltyStatistics();
             <header class="top-header">
                 <h1 class="page-title">Penalty Management</h1>
                 <div class="header-actions">
+                    <button class="btn btn-success" onclick="openManualPenaltyModal()">
+                        <i class="fas fa-plus"></i> Add Penalty
+                    </button>
                 </div>
             </header>
 
@@ -367,29 +370,29 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     <h2><i class="fas fa-chart-bar"></i> Penalty Snapshot</h2>
                 </div>
 
-                <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;">
-                    <div class="stat-card warn" style="background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%); border-radius: 16px; padding: 24px; box-shadow: 0 4px 16px rgba(253,203,110,0.3); transition: all 0.3s ease;">
-                        <div class="stat-icon">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #ffc107; color: white;">
                             <i class="fas fa-exclamation-triangle"></i>
                         </div>
                         <div class="stat-content">
                             <h3 class="stat-number"><?= number_format($stats['by_status']['Pending']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Pending Decisions</p>
+                            <p class="stat-label">Pending</p>
                         </div>
                     </div>
 
-                    <div class="stat-card amount" style="background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%); border-radius: 16px; padding: 24px; box-shadow: 0 4px 16px rgba(108,92,231,0.3); transition: all 0.3s ease;">
-                        <div class="stat-icon">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #6c5ce7; color: white;">
                             <i class="fas fa-peso-sign"></i>
                         </div>
                         <div class="stat-content">
                             <h3 class="stat-number">₱<?= number_format($stats['total_amount_owed'], 2) ?></h3>
-                            <p class="stat-label">Total Amount Tracked</p>
+                            <p class="stat-label">Total Amount</p>
                         </div>
                     </div>
 
-                    <div class="stat-card damage" style="background: linear-gradient(135deg, #fab1a0 0%, #ff7675 100%); border-radius: 16px; padding: 24px; box-shadow: 0 4px 16px rgba(255,118,117,0.3); transition: all 0.3s ease;">
-                        <div class="stat-icon">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #dc3545; color: white;">
                             <i class="fas fa-hammer"></i>
                         </div>
                         <div class="stat-content">
@@ -398,13 +401,13 @@ $stats = $penaltySystem->getPenaltyStatistics();
                         </div>
                     </div>
 
-                    <div class="stat-card resolved" style="background: linear-gradient(135deg, #55efc4 0%, #00b894 100%); border-radius: 16px; padding: 24px; box-shadow: 0 4px 16px rgba(0,184,148,0.3); transition: all 0.3s ease;">
-                        <div class="stat-icon">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #28a745; color: white;">
                             <i class="fas fa-check-circle"></i>
                         </div>
                         <div class="stat-content">
                             <h3 class="stat-number"><?= number_format($stats['by_status']['Resolved']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Resolved Penalties</p>
+                            <p class="stat-label">Resolved</p>
                         </div>
                     </div>
                 </div>
@@ -726,78 +729,106 @@ $stats = $penaltySystem->getPenaltyStatistics();
     <!-- Create Penalty Modal -->
     <div id="createPenaltyModal" class="modal">
         <div class="modal-content">
-            <span class="close" onclick="closeModal()">&times;</span>
-            <h2>Create Penalty</h2>
+            <span class="close" onclick="closeManualPenaltyModal()">&times;</span>
+            <h2>Add Penalty Manually</h2>
             <form id="createPenaltyForm" method="POST">
                 <input type="hidden" name="action" value="create_penalty">
+                <input type="hidden" id="user_id" name="user_id">
 
-                <div class="form-group">
-                    <label for="rfid_id">Borrower RFID ID</label>
-                    <input type="text" id="rfid_id" name="rfid_id" required placeholder="Enter RFID ID">
-                    <button type="button" class="btn btn-small btn-secondary" onclick="searchByRFID()">
-                        <i class="fas fa-search"></i> Search
-                    </button>
+                <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label for="manual_student_id">Student ID <span class="required">*</span></label>
+                        <input type="text" id="manual_student_id" name="manual_student_id" placeholder="Enter Student ID" onblur="searchStudent()">
+                        <small class="form-hint">Enter student ID to auto-fill details</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="rfid_id">RFID Tag</label>
+                        <input type="text" id="rfid_id" name="rfid_id" placeholder="RFID Tag (optional)" readonly>
+                    </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="transaction_id">Transaction ID</label>
-                    <input type="number" id="transaction_id" name="transaction_id" min="1" required placeholder="Enter Transaction ID">
-                    <button type="button" class="btn btn-small btn-secondary" onclick="loadTransactionDetails()">
-                        <i class="fas fa-download"></i> Load Details
-                    </button>
+                    <label for="transaction_id">Transaction ID (Optional)</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="number" id="transaction_id" name="transaction_id" min="1" placeholder="Leave blank for manual entry" style="flex: 1;">
+                        <button type="button" class="btn btn-secondary" onclick="loadTransactionDetails()" style="white-space: nowrap;">
+                            <i class="fas fa-download"></i> Load from Transaction
+                        </button>
+                    </div>
+                    <small class="form-hint">Optional: Load equipment details from existing transaction</small>
+                </div>
+
+                <div class="form-row" style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
+                    <div class="form-group">
+                        <label for="equipment_id">Equipment ID</label>
+                        <input type="text" id="equipment_id" name="equipment_id" placeholder="Equipment ID">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="equipment_name">Equipment Name <span class="required">*</span></label>
+                        <input type="text" id="equipment_name" name="equipment_name" required placeholder="Enter equipment name">
+                    </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="equipment_id">Equipment ID</label>
-                    <input type="number" id="equipment_id" name="equipment_id" min="1" required placeholder="Auto-filled from transaction">
+                    <label for="manual_guideline_id">Select Penalty Guideline <span class="required">*</span></label>
+                    <select id="manual_guideline_id" name="guideline_id" required onchange="updatePenaltyFromGuideline()">
+                        <option value="">-- Select Penalty Guideline --</option>
+                        <?php foreach ($activeGuidelines as $guideline): ?>
+                            <option value="<?= htmlspecialchars($guideline['id']) ?>" 
+                                    data-type="<?= htmlspecialchars($guideline['penalty_type']) ?>"
+                                    data-amount="<?= htmlspecialchars($guideline['penalty_amount']) ?>"
+                                    data-points="<?= htmlspecialchars($guideline['penalty_points'] ?? '') ?>">
+                                <?= htmlspecialchars($guideline['guideline_name'] ?? $guideline['title']) ?> 
+                                (<?= htmlspecialchars($guideline['penalty_type']) ?>) - 
+                                ₱<?= number_format($guideline['penalty_amount'], 2) ?>
+                                <?php if (!empty($guideline['penalty_points'])): ?>
+                                    | <?= htmlspecialchars($guideline['penalty_points']) ?> points
+                                <?php endif; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="form-hint">Penalty amount will be automatically set based on guideline</small>
                 </div>
 
-                <div class="form-group">
-                    <label for="equipment_name">Equipment Name</label>
-                    <input type="text" id="equipment_name" name="equipment_name" required placeholder="Auto-filled from transaction">
+                <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;" id="late_return_fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="days_overdue">Days Overdue</label>
+                        <input type="number" id="days_overdue" name="days_overdue" min="0" value="0" onchange="calculateLatePenalty()">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="daily_rate">Daily Rate (₱)</label>
+                        <input type="number" id="daily_rate" name="daily_rate" step="0.01" min="0" value="50.00">
+                    </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="penalty_type">Penalty Type</label>
-                    <select id="penalty_type" name="penalty_type" required onchange="updatePenaltyAmount()">
-                        <option value="">Select penalty type</option>
-                        <option value="Overdue">Overdue</option>
-                        <option value="Damaged">Damaged</option>
-                        <option value="Lost">Lost</option>
+                <div class="form-group" id="damage_severity_group" style="display: none;">
+                    <label for="damage_severity">Damage Severity</label>
+                    <select id="damage_severity" name="damage_severity">
+                        <option value="">-- Select Severity --</option>
+                        <option value="minor">Minor - Superficial damage</option>
+                        <option value="moderate">Moderate - Visible damage</option>
+                        <option value="severe">Severe - Major damage</option>
+                        <option value="total_loss">Total Loss - Beyond repair</option>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label for="penalty_amount">Amount (â‚±)</label>
-                    <input type="number" id="penalty_amount" name="penalty_amount" step="0.01" min="0" value="0.00" required>
-                    <small class="form-help">Amount will be auto-calculated for overdue penalties</small>
+                    <label for="manual_notes">Notes / Description</label>
+                    <textarea id="manual_notes" name="notes" rows="3" placeholder="Add details about the penalty reason..."></textarea>
                 </div>
 
-                <div class="form-group" id="days_overdue_group">
-                    <label for="days_overdue">Days Overdue (for Overdue type)</label>
-                    <input type="number" id="days_overdue" name="days_overdue" min="0" value="0" onchange="calculateOverduePenalty()">
-                </div>
-
-                <div class="form-group">
-                    <label for="violation_date">Violation Date</label>
-                    <input type="date" id="violation_date" name="violation_date" value="<?= date('Y-m-d') ?>" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="notes">Notes</label>
-                    <textarea id="notes" name="notes" rows="3" placeholder="Additional notes about the penalty..."></textarea>
-                </div>
-
-                <div class="penalty-preview" id="penalty_preview" style="display: none;">
-                    <h4>Penalty Preview</h4>
-                    <div id="preview_content"></div>
+                <div class="penalty-preview" id="manual_penalty_preview" style="background: #e7f3ff; padding: 12px; border-radius: 6px; margin: 15px 0;">
+                    <strong>Penalty Amount: ₱<span id="preview_amount">0.00</span></strong>
                 </div>
 
                 <div class="form-actions">
                     <button type="submit" class="btn btn-success">
-                        <i class="fas fa-save"></i> Create & Apply Penalty
+                        <i class="fas fa-save"></i> Create Penalty
                     </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">
+                    <button type="button" class="btn btn-secondary" onclick="closeManualPenaltyModal()">
                         <i class="fas fa-times"></i> Cancel
                     </button>
                 </div>
@@ -831,29 +862,22 @@ $stats = $penaltySystem->getPenaltyStatistics();
         }
 
         .alert {
-            padding: 16px 20px;
-            margin: 20px 0;
-            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 16px 0;
+            border-radius: 8px;
             display: flex;
             align-items: center;
-            gap: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            animation: slideDown 0.3s ease-out;
-        }
-
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
+            gap: 10px;
         }
         
         .alert-success {
-            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            background: #d4edda;
             color: #155724;
             border-left: 4px solid #28a745;
         }
         
         .alert-error {
-            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            background: #f8d7da;
             color: #721c24;
             border-left: 4px solid #dc3545;
         }
@@ -862,12 +886,11 @@ $stats = $penaltySystem->getPenaltyStatistics();
             display: flex;
             gap: 15px;
             align-items: end;
-            margin-bottom: 25px;
-            padding: 24px;
-            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-            border-radius: 12px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-            border: 1px solid #e9ecef;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
         }
         
         .filter-group {
@@ -885,24 +908,21 @@ $stats = $penaltySystem->getPenaltyStatistics();
             font-weight: 600;
             color: #495057;
             font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
         .filter-group select,
         .filter-group input[type="text"] {
-            padding: 10px 14px;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
             font-size: 0.95rem;
-            transition: all 0.2s ease;
         }
 
         .filter-group select:focus,
         .filter-group input[type="text"]:focus {
             outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
         }
         
         .table-container {
@@ -911,50 +931,28 @@ $stats = $penaltySystem->getPenaltyStatistics();
         
         .penalties-table {
             width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
+            border-collapse: collapse;
             background: white;
-            border-radius: 12px;
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
         }
         
         .penalties-table th,
         .penalties-table td {
-            padding: 16px;
+            padding: 12px;
             text-align: left;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid #dee2e6;
         }
         
         .penalties-table th {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #006633;
             font-weight: 600;
             color: white;
-            text-transform: uppercase;
-            font-size: 0.85rem;
-            letter-spacing: 0.5px;
-        }
-
-        .penalties-table th:first-child {
-            border-top-left-radius: 12px;
-        }
-
-        .penalties-table th:last-child {
-            border-top-right-radius: 12px;
+            font-size: 0.9rem;
         }
         
-        .penalties-table tbody tr {
-            transition: all 0.2s ease;
-        }
-
         .penalties-table tbody tr:hover {
-            background: #f8f9ff;
-            transform: scale(1.01);
-            box-shadow: 0 2px 8px rgba(102,126,234,0.1);
-        }
-
-        .penalties-table tbody tr:last-child td {
-            border-bottom: none;
+            background: #f8f9fa;
         }
         
         .student-info {
@@ -973,80 +971,64 @@ $stats = $penaltySystem->getPenaltyStatistics();
         }
         
         .badge.penalty-type {
-            padding: 6px 12px;
-            border-radius: 20px;
+            padding: 4px 10px;
+            border-radius: 12px;
             font-size: 0.75rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
+            font-weight: 600;
+            display: inline-block;
         }
         
         .badge.penalty-type.overdue,
         .badge.penalty-type.late-return {
-            background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
-            color: #d63031;
-            box-shadow: 0 2px 6px rgba(253,203,110,0.3);
+            background: #ffc107;
+            color: #000;
         }
         
         .badge.penalty-type.damaged,
         .badge.penalty-type.damage {
-            background: linear-gradient(135deg, #fab1a0 0%, #ff7675 100%);
-            color: #2d3436;
-            box-shadow: 0 2px 6px rgba(255,118,117,0.3);
+            background: #dc3545;
+            color: white;
         }
         
         .badge.penalty-type.lost,
         .badge.penalty-type.loss {
-            background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%);
+            background: #6c757d;
             color: white;
-            box-shadow: 0 2px 6px rgba(108,92,231,0.3);
         }
         
         .badge.status {
-            padding: 6px 12px;
-            border-radius: 20px;
+            padding: 4px 10px;
+            border-radius: 12px;
             font-size: 0.75rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
+            font-weight: 600;
+            display: inline-block;
         }
         
         .badge.status.pending {
-            background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
-            color: #d63031;
-            box-shadow: 0 2px 6px rgba(253,203,110,0.3);
+            background: #ffc107;
+            color: #000;
         }
         
         .badge.status.resolved,
         .badge.status.paid {
-            background: linear-gradient(135deg, #55efc4 0%, #00b894 100%);
-            color: #2d3436;
-            box-shadow: 0 2px 6px rgba(0,184,148,0.3);
+            background: #28a745;
+            color: white;
         }
         
         .badge.status.cancelled,
         .badge.status.waived {
-            background: linear-gradient(135deg, #dfe6e9 0%, #b2bec3 100%);
-            color: #2d3436;
-            box-shadow: 0 2px 6px rgba(178,190,195,0.3);
+            background: #6c757d;
+            color: white;
         }
         
         .badge.status.under-review {
-            background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+            background: #17a2b8;
             color: white;
-            box-shadow: 0 2px 6px rgba(9,132,227,0.3);
         }
 
         .badge.status.appealed {
-            background: linear-gradient(135deg, #a29bfe 0%, #6c5ce7 100%);
+            background: #6c5ce7;
             color: white;
-            box-shadow: 0 2px 6px rgba(108,92,231,0.3);
         }
         
         .amount {
@@ -1081,46 +1063,37 @@ $stats = $penaltySystem->getPenaltyStatistics();
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.6);
-            backdrop-filter: blur(4px);
-            animation: fadeIn 0.2s ease;
+            background-color: rgba(0,0,0,0.5);
         }
         
         .modal-content {
             background: white;
-            margin: 3% auto;
-            padding: 32px;
-            border-radius: 16px;
+            margin: 5% auto;
+            padding: 24px;
+            border-radius: 8px;
             width: 85%;
             max-width: 650px;
             position: relative;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            animation: slideUp 0.3s ease-out;
-        }
-
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
 
         .modal-content h2 {
-            margin: 0 0 24px 0;
-            color: #2d3436;
-            font-size: 1.5rem;
-            font-weight: 700;
+            margin: 0 0 20px 0;
+            color: #333;
+            font-size: 1.4rem;
+            font-weight: 600;
         }
         
         .close {
             position: absolute;
-            right: 20px;
-            top: 20px;
-            color: #b2bec3;
-            font-size: 32px;
+            right: 15px;
+            top: 15px;
+            color: #999;
+            font-size: 28px;
             font-weight: bold;
             cursor: pointer;
-            transition: all 0.2s ease;
-            width: 36px;
-            height: 36px;
+            width: 30px;
+            height: 30px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1149,11 +1122,10 @@ $stats = $penaltySystem->getPenaltyStatistics();
         .form-group input,
         .form-group textarea {
             width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
             font-size: 0.95rem;
-            transition: all 0.2s ease;
             font-family: inherit;
         }
 
@@ -1161,8 +1133,8 @@ $stats = $penaltySystem->getPenaltyStatistics();
         .form-group input:focus,
         .form-group textarea:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
         }
 
         .form-group textarea {
@@ -1193,12 +1165,11 @@ $stats = $penaltySystem->getPenaltyStatistics();
         }
         
         .penalty-preview {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border: 2px solid #dee2e6;
-            border-radius: 12px;
-            padding: 20px;
-            margin: 20px 0;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
         }
         
         .penalty-preview h4 {
@@ -1227,21 +1198,18 @@ $stats = $penaltySystem->getPenaltyStatistics();
         
         .quick-penalty-item {
             background: white;
-            border: 2px solid #e9ecef;
-            border-radius: 12px;
-            padding: 20px;
-            margin: 12px 0;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 10px 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
 
         .quick-penalty-item:hover {
-            border-color: #667eea;
-            box-shadow: 0 4px 16px rgba(102,126,234,0.15);
-            transform: translateY(-2px);
+            border-color: #007bff;
+            background: #f8f9fa;
         }
         
         .quick-penalty-info {
@@ -1262,33 +1230,28 @@ $stats = $penaltySystem->getPenaltyStatistics();
         }
         
         .btn-info {
-            background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+            background: #17a2b8;
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
+            padding: 8px 16px;
+            border-radius: 4px;
             font-weight: 600;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 8px rgba(9,132,227,0.3);
         }
         
         .btn-info:hover {
-            background: linear-gradient(135deg, #0984e3 0%, #0652dd 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(9,132,227,0.4);
+            background: #138496;
         }
         
         /* Damage Penalty Section Styles */
         .damage-penalty-section {
-            background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
-            border: 2px solid #ffcdd2;
+            background: #fff;
+            border: 1px solid #f8d7da;
         }
         
         .damage-penalty-card {
             background: white;
             border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 16px;
         }
         
         .damage-info-grid {
@@ -1350,11 +1313,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
             overflow: hidden;
         }
 
-        .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.15) !important;
-        }
-
         .stat-card .stat-icon {
             font-size: 2.5rem;
             opacity: 0.9;
@@ -1373,69 +1331,54 @@ $stats = $penaltySystem->getPenaltyStatistics();
             font-weight: 600;
             margin: 8px 0 0 0;
             color: #2d3436;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
         /* Button Enhancements */
         .btn {
-            padding: 10px 20px;
-            border-radius: 8px;
+            padding: 8px 16px;
+            border-radius: 4px;
             font-weight: 600;
-            transition: all 0.2s ease;
             border: none;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #007bff;
             color: white;
-            box-shadow: 0 2px 8px rgba(102,126,234,0.3);
         }
 
         .btn-primary:hover {
-            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+            background: #0056b3;
         }
 
         .btn-success {
-            background: linear-gradient(135deg, #55efc4 0%, #00b894 100%);
-            color: #2d3436;
-            box-shadow: 0 2px 8px rgba(0,184,148,0.3);
+            background: #28a745;
+            color: white;
         }
 
         .btn-success:hover {
-            background: linear-gradient(135deg, #00b894 0%, #00a383 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,184,148,0.4);
+            background: #218838;
         }
 
         .btn-secondary {
-            background: linear-gradient(135deg, #dfe6e9 0%, #b2bec3 100%);
-            color: #2d3436;
-            box-shadow: 0 2px 8px rgba(178,190,195,0.3);
+            background: #6c757d;
+            color: white;
         }
 
         .btn-secondary:hover {
-            background: linear-gradient(135deg, #b2bec3 0%, #95a5a6 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(178,190,195,0.4);
+            background: #5a6268;
         }
 
         .btn-warning {
-            background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%);
-            color: #2d3436;
-            box-shadow: 0 2px 8px rgba(253,203,110,0.3);
+            background: #ffc107;
+            color: #212529;
         }
 
         .btn-warning:hover {
-            background: linear-gradient(135deg, #fdcb6e 0%, #f39c12 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(253,203,110,0.4);
+            background: #e0a800;
         }
 
         /* No Data State */
@@ -1470,30 +1413,27 @@ $stats = $penaltySystem->getPenaltyStatistics();
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.6);
-            backdrop-filter: blur(4px);
-            animation: fadeIn 0.2s ease;
+            background-color: rgba(0,0,0,0.5);
         }
 
         .penalty-detail-content {
             background: white;
-            margin: 2% auto;
+            margin: 3% auto;
             padding: 0;
-            border-radius: 16px;
+            border-radius: 8px;
             width: 90%;
             max-width: 900px;
             position: relative;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            animation: slideUp 0.3s ease-out;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             max-height: 90vh;
             overflow-y: auto;
         }
 
         .penalty-detail-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #006633;
             color: white;
-            padding: 24px 32px;
-            border-radius: 16px 16px 0 0;
+            padding: 20px 24px;
+            border-radius: 8px 8px 0 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1509,12 +1449,11 @@ $stats = $penaltySystem->getPenaltyStatistics();
             background: rgba(255,255,255,0.2);
             border: none;
             color: white;
-            font-size: 28px;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
+            font-size: 24px;
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
             cursor: pointer;
-            transition: all 0.2s ease;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1522,11 +1461,10 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         .penalty-detail-close:hover {
             background: rgba(255,255,255,0.3);
-            transform: rotate(90deg);
         }
 
         .penalty-detail-body {
-            padding: 32px;
+            padding: 24px;
         }
 
         .detail-grid {
@@ -1538,9 +1476,9 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         .detail-section {
             background: #f8f9fa;
-            padding: 20px;
-            border-radius: 12px;
-            border: 2px solid #e9ecef;
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
         }
 
         .detail-section h3 {
@@ -1579,6 +1517,11 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         .full-width-section {
             grid-column: 1 / -1;
+        }
+
+        .required {
+            color: #dc3545;
+            font-weight: bold;
         }
 
         .action-buttons {
@@ -2150,6 +2093,117 @@ $stats = $penaltySystem->getPenaltyStatistics();
             const modal = document.getElementById('statusModal');
             if (event.target === modal) {
                 modal.style.display = 'none';
+            }
+        });
+
+        // Manual Penalty Modal Functions
+        function openManualPenaltyModal() {
+            const modal = document.getElementById('createPenaltyModal');
+            if (modal) {
+                // Reset form
+                document.getElementById('createPenaltyForm').reset();
+                document.getElementById('preview_amount').textContent = '0.00';
+                document.getElementById('late_return_fields').style.display = 'none';
+                document.getElementById('damage_severity_group').style.display = 'none';
+                modal.style.display = 'block';
+            }
+        }
+
+        function closeManualPenaltyModal() {
+            const modal = document.getElementById('createPenaltyModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        function searchStudent() {
+            const studentId = document.getElementById('manual_student_id').value.trim();
+            if (!studentId) return;
+
+            fetch(`api/search_student.php?student_id=${encodeURIComponent(studentId)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.student) {
+                        document.getElementById('user_id').value = data.student.id || '';
+                        document.getElementById('rfid_id').value = data.student.rfid_tag || '';
+                    } else {
+                        alert('Student not found. Please verify the Student ID.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error searching student:', error);
+                });
+        }
+
+        function loadTransactionDetails() {
+            const transactionId = document.getElementById('transaction_id').value;
+            if (!transactionId) {
+                alert('Please enter a Transaction ID');
+                return;
+            }
+
+            fetch(`api/get_transaction_details.php?id=${transactionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.transaction) {
+                        const txn = data.transaction;
+                        document.getElementById('manual_student_id').value = txn.student_id || '';
+                        document.getElementById('rfid_id').value = txn.rfid_tag || '';
+                        document.getElementById('user_id').value = txn.user_id || '';
+                        document.getElementById('equipment_id').value = txn.equipment_id || '';
+                        document.getElementById('equipment_name').value = txn.equipment_name || '';
+                        alert('Transaction details loaded successfully!');
+                    } else {
+                        alert(data.message || 'Transaction not found');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading transaction:', error);
+                    alert('Failed to load transaction details');
+                });
+        }
+
+        function updatePenaltyFromGuideline() {
+            const select = document.getElementById('manual_guideline_id');
+            const selectedOption = select.options[select.selectedIndex];
+            
+            if (!selectedOption || !selectedOption.value) {
+                document.getElementById('preview_amount').textContent = '0.00';
+                document.getElementById('late_return_fields').style.display = 'none';
+                document.getElementById('damage_severity_group').style.display = 'none';
+                return;
+            }
+
+            const penaltyType = selectedOption.dataset.type || '';
+            const amount = parseFloat(selectedOption.dataset.amount) || 0;
+
+            // Show/hide fields based on penalty type
+            if (penaltyType.toLowerCase().includes('late') || penaltyType.toLowerCase().includes('overdue')) {
+                document.getElementById('late_return_fields').style.display = 'grid';
+                document.getElementById('damage_severity_group').style.display = 'none';
+            } else if (penaltyType.toLowerCase().includes('damage')) {
+                document.getElementById('late_return_fields').style.display = 'none';
+                document.getElementById('damage_severity_group').style.display = 'block';
+            } else {
+                document.getElementById('late_return_fields').style.display = 'none';
+                document.getElementById('damage_severity_group').style.display = 'none';
+            }
+
+            document.getElementById('preview_amount').textContent = amount.toFixed(2);
+        }
+
+        function calculateLatePenalty() {
+            const days = parseInt(document.getElementById('days_overdue').value) || 0;
+            const rate = parseFloat(document.getElementById('daily_rate').value) || 50;
+            const total = days * rate;
+            document.getElementById('preview_amount').textContent = total.toFixed(2);
+        }
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (event) => {
+            const createModal = document.getElementById('createPenaltyModal');
+            if (event.target === createModal) {
+                closeManualPenaltyModal();
             }
         });
 
