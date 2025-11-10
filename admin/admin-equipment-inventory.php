@@ -1,24 +1,49 @@
 <?php
 session_start();
 
-// Simple authentication check
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+// Include stability components
+require_once 'error_handler.php';
+require_once 'input_validator.php';
+
+// Initialize error handling
+SystemErrorHandler::initialize();
+
+// Validate session
+if (!InputValidator::validateSession()) {
     header('Location: login.php');
     exit;
 }
 
-// Database connection
+// Log user action
+SystemErrorHandler::logUserAction('VIEW_EQUIPMENT_INVENTORY');
+
+// Database connection with improved error handling
 $host = "localhost";
 $user = "root";       
 $password = "";   
 $dbname = "capstone";
 
-$conn = @new mysqli($host, $user, $password, $dbname);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+try {
+    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $user, $password);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    
+    // For backward compatibility, create mysqli connection
+    $conn = new mysqli($host, $user, $password, $dbname);
+    if ($conn->connect_error) {
+        throw new Exception("MySQLi connection failed: " . $conn->connect_error);
+    }
+    $conn->set_charset("utf8mb4");
+} catch (Exception $e) {
+    SystemErrorHandler::logError([
+        'type' => 'DATABASE_ERROR',
+        'message' => 'Connection failed: ' . $e->getMessage(),
+        'file' => __FILE__,
+        'line' => __LINE__,
+        'timestamp' => date('Y-m-d H:i:s')
+    ]);
+    die('Database connection failed. Please try again later.');
 }
-
-$conn->select_db($dbname);
 
 // Handle session messages from add_equipment.php
 $error_message = $_SESSION['error_message'] ?? null;
@@ -94,12 +119,9 @@ if ($category_result) {
     $category_result->free();
 }
 
-// Get stock filter from URL parameter
-$stock_filter = isset($_GET['stock']) ? $_GET['stock'] : 'all';
-$allowed_filters = ['all', 'available', 'out_of_stock'];
-if (!in_array($stock_filter, $allowed_filters)) {
-    $stock_filter = 'all';
-}
+// Get and validate filter parameters
+$filterParams = InputValidator::validateFilterParams($_GET);
+$stock_filter = $filterParams['stock'];
 
 // Build SQL query with stock filter and maintenance count
 $sql = "SELECT e.*, e.size_category, c.name as category_name, 
@@ -172,7 +194,7 @@ $hasEquipment = !empty($equipment_items);
                 <div class="section-header">
                     <div class="search-wrapper" style="flex: 1; max-width: 600px; display: flex; align-items: center;">
                         <i class="fas fa-search"></i>
-                        <input id="searchInput" type="text" placeholder="Search by name, ID, condition..." style="width: 100%; height: 38px; border: none; outline: none; font-size: 1rem;">
+                        <input id="searchInput" type="text" placeholder="Search by name, ID, condition..." style="width: 100%; height: 38px; border: none; outline: none; font-size: 1rem;" maxlength="100">
                     </div>
                     <select id="stockFilter" class="filter-select" onchange="filterByStock(this.value)" style="margin-right: 10px;">
                         <option value="all" <?= $stock_filter === 'all' ? 'selected' : '' ?>>All Stock Status</option>
@@ -406,7 +428,8 @@ $hasEquipment = !empty($equipment_items);
             const emptyState = document.getElementById('emptyState');
 
             function filterEquipment() {
-                const searchTerm = searchInput.value.toLowerCase();
+                // Sanitize search input
+                const searchTerm = searchInput.value.toLowerCase().replace(/[<>'"&]/g, '');
                 const activePill = categoryPills.querySelector('.category-pill.active');
                 const selectedCategory = (activePill ? activePill.dataset.category : 'all').toLowerCase();
                 
