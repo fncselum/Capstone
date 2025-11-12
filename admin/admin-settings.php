@@ -337,6 +337,118 @@ if ($size_result) {
             border-radius: 8px;
             resize: vertical;
         }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 9999;
+        }
+
+        .toast {
+            min-width: 280px;
+            max-width: 360px;
+            background: white;
+            border-radius: 12px;
+            border-left: 4px solid #006633;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+            padding: 16px 18px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            animation: slideIn 0.4s ease, fadeOut 0.4s ease forwards;
+            animation-delay: 0s, 4.6s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .toast::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            width: 100%;
+            background: rgba(0,102,51,0.15);
+            animation: shrink 5s linear forwards;
+        }
+
+        .toast.success { border-left-color: #2e7d32; }
+        .toast.success .toast-icon { background: rgba(46,125,50,0.15); color: #2e7d32; }
+
+        .toast.error { border-left-color: #c62828; }
+        .toast.error .toast-icon { background: rgba(198,40,40,0.15); color: #c62828; }
+
+        .toast.info { border-left-color: #1565c0; }
+        .toast.info .toast-icon { background: rgba(21,101,192,0.15); color: #1565c0; }
+
+        .toast-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-title {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #1a1a1a;
+            margin-bottom: 4px;
+        }
+
+        .toast-message {
+            font-size: 0.9rem;
+            color: #555;
+            line-height: 1.4;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 4px;
+            transition: color 0.2s ease;
+        }
+
+        .toast-close:hover {
+            color: #222;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateX(40%);
+            }
+        }
+
+        @keyframes shrink {
+            from { width: 100%; }
+            to { width: 0; }
+        }
     </style>
 </head>
 <body>
@@ -367,8 +479,15 @@ if ($size_result) {
                     </div>
                     <h2>Database Setup Required</h2>
                     <p>The system_settings table needs to be created in your database.</p>
+                    
+                    <div style="margin: 30px 0;">
+                        <a href="setup_settings_table.php" class="btn-save" style="text-decoration: none; display: inline-flex;">
+                            <i class="fas fa-magic"></i> Auto Setup (Recommended)
+                        </a>
+                    </div>
+                    
                     <div class="setup-sql" style="margin-top: 30px; text-align: left;">
-                        <h3>Quick Setup SQL:</h3>
+                        <h3>Or Manual Setup SQL:</h3>
                         <textarea readonly onclick="this.select()">CREATE TABLE IF NOT EXISTS `system_settings` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `setting_key` VARCHAR(100) NOT NULL UNIQUE,
@@ -470,7 +589,12 @@ if ($size_result) {
                                     <input type="checkbox" name="enable_email_alerts" <?= $settings['enable_email_alerts'] == '1' ? 'checked' : '' ?>>
                                     <span class="toggle-slider"></span>
                                 </label>
-                                <small>Send email alerts for critical events</small>
+                                <small>Send email alerts for critical events (overdue, borrow, return notifications)</small>
+                                <div style="margin-top: 10px;">
+                                    <a href="test_email.php" style="color: #006633; text-decoration: none; font-size: 0.9rem;">
+                                        <i class="fas fa-envelope"></i> Test Email Configuration
+                                    </a>
+                                </div>
                             </div>
                             
                             <div class="form-group">
@@ -530,10 +654,10 @@ if ($size_result) {
                         </p>
                         
                         <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                            <button class="btn-save" onclick="backupDatabase()">
+                            <button class="btn-save" onclick="backupDatabase(this)">
                                 <i class="fas fa-download"></i> Backup Database
                             </button>
-                            <button class="btn-save btn-danger" onclick="clearCache()">
+                            <button class="btn-save btn-danger" onclick="clearCache(this)">
                                 <i class="fas fa-trash"></i> Clear Cache
                             </button>
                         </div>
@@ -542,6 +666,8 @@ if ($size_result) {
             <?php endif; ?>
         </main>
     </div>
+
+    <div class="toast-container" id="toastContainer"></div>
 
     <script>
         function logout() {
@@ -552,6 +678,42 @@ if ($size_result) {
 
         function switchTab(tab) {
             window.location.href = '?tab=' + tab;
+        }
+
+        function showToast(type = 'info', title = 'Notification', message = '') {
+            const container = document.getElementById('toastContainer');
+            if (!container) return;
+
+            const icons = {
+                success: 'fa-circle-check',
+                error: 'fa-triangle-exclamation',
+                info: 'fa-circle-info'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="toast-icon"><i class="fas ${icons[type] || icons.info}"></i></div>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message.replace(/\n/g, '<br>')}</div>
+                </div>
+                <button class="toast-close" aria-label="Close"><i class="fas fa-times"></i></button>
+            `;
+
+            const removeToast = () => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            };
+
+            toast.querySelector('.toast-close').addEventListener('click', () => {
+                toast.classList.add('closing');
+                setTimeout(removeToast, 200);
+            });
+
+            container.appendChild(toast);
+            setTimeout(removeToast, 5000);
         }
 
         // General Settings Form
@@ -572,14 +734,13 @@ if ($size_result) {
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert('Settings saved successfully!');
-                    location.reload();
+                    showToast('success', 'Settings Saved', 'General settings updated successfully.');
                 } else {
-                    alert('Error: ' + data.message);
+                    showToast('error', 'Save Failed', data.message || 'Unable to save general settings.');
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('Failed to save settings');
+                showToast('error', 'Save Failed', 'An unexpected error occurred while saving general settings.');
             }
         });
 
@@ -605,26 +766,78 @@ if ($size_result) {
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert('Settings saved successfully!');
-                    location.reload();
+                    showToast('success', 'Settings Saved', 'System configuration updated successfully.');
                 } else {
-                    alert('Error: ' + data.message);
+                    showToast('error', 'Save Failed', data.message || 'Unable to save system settings.');
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('Failed to save settings');
+                showToast('error', 'Save Failed', 'An unexpected error occurred while saving system settings.');
             }
         });
 
-        function backupDatabase() {
-            if (confirm('Create a database backup? This may take a few moments.')) {
-                alert('Database backup feature will be implemented. Please use phpMyAdmin Export for now.');
+        async function backupDatabase(button) {
+            if (!confirm('Create a database backup? This may take a few moments.')) {
+                return;
+            }
+            
+            try {
+                // Show loading state
+                const btn = button;
+                const originalHTML = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating backup...';
+                
+                // Trigger download
+                window.location.href = 'backup_database.php';
+                
+                // Reset button after delay
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                    showToast('success', 'Backup Started', 'Database backup download should begin shortly.');
+                }, 2000);
+                
+            } catch (error) {
+                console.error('Backup error:', error);
+                showToast('error', 'Backup Failed', 'Unable to create database backup. Please try again.');
             }
         }
 
-        function clearCache() {
-            if (confirm('Clear system cache? This action cannot be undone.')) {
-                alert('Cache cleared successfully!');
+        async function clearCache(button) {
+            if (!confirm('Clear system cache? This will remove temporary files and cached data.')) {
+                return;
+            }
+            
+            try {
+                // Show loading state
+                const btn = button;
+                const originalHTML = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing cache...';
+                
+                const response = await fetch('clear_cache.php', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+                
+                if (data.success) {
+                    let message = 'Cache cleared successfully!';
+                    if (Array.isArray(data.cleared) && data.cleared.length > 0) {
+                        message += '\n\n' + data.cleared.map(item => '• ' + item).join('\n');
+                    }
+                    showToast('success', 'Cache Cleared', message);
+                } else {
+                    showToast('error', 'Cache Clear Failed', data.message || 'Unable to clear cache.');
+                }
+                
+            } catch (error) {
+                console.error('Cache clear error:', error);
+                showToast('error', 'Cache Clear Failed', 'An unexpected error occurred while clearing cache.');
             }
         }
     </script>

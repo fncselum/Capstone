@@ -8,6 +8,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
+// Include email configuration
+require_once 'includes/email_config.php';
+
 // Database connection
 $host = "localhost";
 $user = "root";
@@ -28,11 +31,27 @@ if (!$table_check || $table_check->num_rows === 0) {
 }
 
 // Get POST data
-$settings = isset($_POST['settings']) ? $_POST['settings'] : [];
+$settings_json = isset($_POST['settings']) ? $_POST['settings'] : '';
+$settings = json_decode($settings_json, true);
 
-if (empty($settings)) {
+if (empty($settings) || !is_array($settings)) {
     echo json_encode(['success' => false, 'message' => 'No settings provided']);
     exit;
+}
+
+// Check if maintenance mode is being changed
+$old_maintenance_mode = null;
+$new_maintenance_mode = null;
+if (isset($settings['maintenance_mode'])) {
+    $check_maintenance = $conn->prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'maintenance_mode'");
+    $check_maintenance->execute();
+    $result_maintenance = $check_maintenance->get_result();
+    if ($result_maintenance && $result_maintenance->num_rows > 0) {
+        $row = $result_maintenance->fetch_assoc();
+        $old_maintenance_mode = $row['setting_value'];
+    }
+    $new_maintenance_mode = $settings['maintenance_mode'];
+    $check_maintenance->close();
 }
 
 $conn->begin_transaction();
@@ -67,6 +86,14 @@ try {
     }
     
     $conn->commit();
+    
+    // Send email if maintenance mode was changed
+    if ($old_maintenance_mode !== null && $new_maintenance_mode !== null && $old_maintenance_mode !== $new_maintenance_mode) {
+        $admin_username = $_SESSION['admin_username'] ?? 'Administrator';
+        $is_enabled = ($new_maintenance_mode == '1');
+        sendMaintenanceModeAlert($conn, $is_enabled, $admin_username);
+    }
+    
     echo json_encode(['success' => true, 'message' => 'Settings saved successfully']);
     
 } catch (Exception $e) {

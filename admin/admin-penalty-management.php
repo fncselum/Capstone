@@ -52,7 +52,7 @@ $penaltyTypes = array_keys($penaltyTypeMap);
 natcasesort($penaltyTypes);
 $penaltyTypes = array_values($penaltyTypes);
 
-$resolutionTypes = ['Paid', 'Repaired', 'Replaced', 'Waived', 'Other'];
+$resolutionTypes = ['Completed', 'Repaired', 'Replaced', 'Waived', 'Dismissed', 'Other'];
 
 // Handle success/error messages
 $success_message = $_SESSION['success_message'] ?? '';
@@ -295,7 +295,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         ];
 
         if ($penaltySystem->updatePenaltyStatus($penaltyId, $statusPayload)) {
-            $success_message = "Penalty status updated successfully.";
+            $_SESSION['success_message'] = "Penalty status updated successfully.";
+            header('Location: admin-penalty-management.php');
+            exit;
+        } else {
+            $error_message = "Failed to update penalty status.";
+        }
+    }
+    
+    if ($action === 'quick_resolve' && isset($_POST['penalty_id'])) {
+        $penaltyId = (int)$_POST['penalty_id'];
+        $resolutionType = $_POST['resolution_type'] ?? 'Paid';
+        $statusPayload = [
+            'status' => 'Resolved',
+            'notes' => 'Quick resolved by admin',
+            'resolution_type' => $resolutionType,
+            'resolution_notes' => 'Resolved via quick action'
+        ];
+
+        if ($penaltySystem->updatePenaltyStatus($penaltyId, $statusPayload)) {
+            $_SESSION['success_message'] = "Penalty marked as resolved.";
+            header('Location: admin-penalty-management.php');
+            exit;
+        } else {
+            $error_message = "Failed to resolve penalty.";
+        }
+    }
+    
+    if ($action === 'cancel_penalty' && isset($_POST['penalty_id'])) {
+        $penaltyId = (int)$_POST['penalty_id'];
+        $reason = $_POST['cancel_reason'] ?? 'Cancelled by admin';
+        $statusPayload = [
+            'status' => 'Cancelled',
+            'notes' => $reason,
+            'resolution_type' => 'Waived',
+            'resolution_notes' => $reason
+        ];
+
+        if ($penaltySystem->updatePenaltyStatus($penaltyId, $statusPayload)) {
+            $_SESSION['success_message'] = "Penalty cancelled successfully.";
+            header('Location: admin-penalty-management.php');
+            exit;
+        } else {
+            $error_message = "Failed to cancel penalty.";
+        }
+    }
+    
+    // Payment processing removed - penalties are tracked for record-keeping only
+    
+    if ($action === 'process_appeal' && isset($_POST['penalty_id'])) {
+        $penaltyId = (int)$_POST['penalty_id'];
+        $appealDecision = $_POST['appeal_decision'] ?? 'Under Review';
+        $appealNotes = $_POST['appeal_notes'] ?? '';
+        
+        $statusPayload = [
+            'status' => $appealDecision,
+            'notes' => 'Appeal processed: ' . $appealNotes,
+            'resolution_type' => ($appealDecision === 'Resolved') ? 'Waived' : null,
+            'resolution_notes' => $appealNotes
+        ];
+
+        if ($penaltySystem->updatePenaltyStatus($penaltyId, $statusPayload)) {
+            $_SESSION['success_message'] = "Appeal processed successfully.";
+            header('Location: admin-penalty-management.php');
+            exit;
         } else {
             $error_message = "Failed to update penalty status.";
         }
@@ -382,12 +445,12 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: #6c5ce7; color: white;">
-                            <i class="fas fa-peso-sign"></i>
+                        <div class="stat-icon" style="background: #17a2b8; color: white;">
+                            <i class="fas fa-search"></i>
                         </div>
                         <div class="stat-content">
-                            <h3 class="stat-number">₱<?= number_format($stats['total_amount_owed'], 2) ?></h3>
-                            <p class="stat-label">Total Amount</p>
+                            <h3 class="stat-number"><?= number_format($stats['by_status']['Under Review']['count'] ?? 0) ?></h3>
+                            <p class="stat-label">Under Review</p>
                         </div>
                     </div>
 
@@ -402,12 +465,32 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     </div>
 
                     <div class="stat-card">
+                        <div class="stat-icon" style="background: #fd7e14; color: white;">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 class="stat-number"><?= number_format($stats['late_return_cases'] ?? 0) ?></h3>
+                            <p class="stat-label">Late Returns</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
                         <div class="stat-icon" style="background: #28a745; color: white;">
                             <i class="fas fa-check-circle"></i>
                         </div>
                         <div class="stat-content">
                             <h3 class="stat-number"><?= number_format($stats['by_status']['Resolved']['count'] ?? 0) ?></h3>
                             <p class="stat-label">Resolved</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #6c757d; color: white;">
+                            <i class="fas fa-gavel"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 class="stat-number"><?= number_format($stats['by_status']['Appealed']['count'] ?? 0) ?></h3>
+                            <p class="stat-label">Appealed</p>
                         </div>
                     </div>
                 </div>
@@ -615,6 +698,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                     <th>Student</th>
                                     <th>Equipment</th>
                                     <th>Type</th>
+                                    <th>Penalty Guideline</th>
                                     <th>Severity</th>
                                     <th>Status</th>
                                     <th>Date Imposed</th>
@@ -632,7 +716,16 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                                 <?= htmlspecialchars($penalty['penalty_type']) ?>
                                             </span>
                                         </td>
-                                        <td><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $penalty['damage_severity'] ?? ''))) ?></td>
+                                        <td>
+                                            <?php if (!empty($penalty['guideline_type'])): ?>
+                                                <span class="guideline-text">
+                                                    <?= htmlspecialchars($penalty['guideline_type']) ?>
+                                                </span>
+                                            <?php else: ?>
+                                                <span class="text-muted">No guideline</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td><?= htmlspecialchars(ucfirst(str_replace('_', ' ', $penalty['damage_severity'] ?? 'N/A'))) ?></td>
                                         <td>
                                             <span class="badge status <?= strtolower(str_replace(' ', '-', $penalty['status'])) ?>">
                                                 <?= htmlspecialchars($penalty['status']) ?>
@@ -641,13 +734,32 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                         <td><?= !empty($penalty['date_imposed']) ? date('M d, Y', strtotime($penalty['date_imposed'])) : 'N/A' ?></td>
                                         <td>
                                             <div class="action-buttons">
-                                                <button class="btn btn-small btn-primary" onclick="viewPenaltyDetail(<?= $penalty['id'] ?>)">
+                                                <button class="btn btn-small btn-info" onclick="viewPenaltyDetail(<?= $penalty['id'] ?>)" title="View Details">
                                                     <i class="fas fa-eye"></i>
                                                 </button>
+                                                
                                                 <?php if ($penalty['status'] === 'Pending' || $penalty['status'] === 'Under Review'): ?>
-                                                    <button class="btn btn-small btn-success" onclick="updatePenaltyStatusModal(<?= $penalty['id'] ?>)">
-                                                        <i class="fas fa-edit"></i>
+                                                    <button class="btn btn-small btn-primary" onclick="updatePenaltyStatusModal(<?= $penalty['id'] ?>)" title="Update Status">
+                                                        <i class="fas fa-edit"></i> Update
                                                     </button>
+                                                    
+                                                    <button class="btn btn-small btn-success" onclick="quickResolveModal(<?= $penalty['id'] ?>, '<?= htmlspecialchars($penalty['penalty_type']) ?>')" title="Mark Resolved">
+                                                        <i class="fas fa-check-circle"></i> Resolve
+                                                    </button>
+                                                    
+                                                    <button class="btn btn-small btn-danger" onclick="dismissPenaltyModal(<?= $penalty['id'] ?>)" title="Dismiss Penalty">
+                                                        <i class="fas fa-times-circle"></i> Dismiss
+                                                    </button>
+                                                <?php elseif ($penalty['status'] === 'Appealed'): ?>
+                                                    <button class="btn btn-small btn-secondary" onclick="processAppealModal(<?= $penalty['id'] ?>)" title="Process Appeal">
+                                                        <i class="fas fa-gavel"></i>
+                                                    </button>
+                                                <?php endif; ?>
+                                                
+                                                <?php if ($penalty['status'] === 'Resolved' || $penalty['status'] === 'Cancelled'): ?>
+                                                    <span class="text-muted" style="font-size: 0.85rem;">
+                                                        <i class="fas fa-check"></i> Completed
+                                                    </span>
                                                 <?php endif; ?>
                                             </div>
                                         </td>
@@ -721,6 +833,100 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">Update Status</button>
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Quick Resolve Modal -->
+    <div id="quickResolveModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeQuickResolveModal()">&times;</span>
+            <h2><i class="fas fa-check-circle"></i> Quick Resolve Penalty</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="quick_resolve">
+                <input type="hidden" name="penalty_id" id="quick_resolve_penalty_id">
+                
+                <div class="form-group">
+                    <label for="quick_resolution_type">Resolution Type</label>
+                    <select name="resolution_type" id="quick_resolution_type" required>
+                        <option value="Completed">Completed</option>
+                        <option value="Repaired">Repaired</option>
+                        <option value="Replaced">Replaced</option>
+                        <option value="Waived">Waived</option>
+                        <option value="Dismissed">Dismissed</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-check"></i> Mark as Resolved
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeQuickResolveModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dismiss Penalty Modal -->
+    <div id="dismissPenaltyModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeDismissPenaltyModal()">&times;</span>
+            <h2><i class="fas fa-times-circle"></i> Dismiss Penalty</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="cancel_penalty">
+                <input type="hidden" name="penalty_id" id="dismiss_penalty_id">
+                
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Note:</strong> Dismissing a penalty will mark it as waived and close the record.
+                </div>
+                
+                <div class="form-group">
+                    <label for="dismiss_reason">Dismissal Reason <span class="required">*</span></label>
+                    <textarea name="cancel_reason" id="dismiss_reason" rows="4" required placeholder="Explain why this penalty is being dismissed..."></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-times"></i> Dismiss Penalty
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeDismissPenaltyModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- Process Appeal Modal -->
+    <div id="processAppealModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeProcessAppealModal()">&times;</span>
+            <h2><i class="fas fa-gavel"></i> Process Appeal</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="process_appeal">
+                <input type="hidden" name="penalty_id" id="process_appeal_penalty_id">
+                
+                <div class="form-group">
+                    <label for="appeal_decision">Appeal Decision <span class="required">*</span></label>
+                    <select name="appeal_decision" id="appeal_decision" required>
+                        <option value="Under Review">Keep Under Review</option>
+                        <option value="Resolved">Approve Appeal (Waive Penalty)</option>
+                        <option value="Pending">Reject Appeal (Keep Pending)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="appeal_notes">Decision Notes <span class="required">*</span></label>
+                    <textarea name="appeal_notes" id="appeal_notes" rows="4" required placeholder="Explain the decision on this appeal..."></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-gavel"></i> Submit Decision
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeProcessAppealModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -1039,11 +1245,23 @@ $stats = $penaltySystem->getPenaltyStatistics();
         .action-buttons {
             display: flex;
             gap: 5px;
+            flex-wrap: wrap;
+            align-items: center;
         }
         
         .btn-small {
             padding: 6px 10px;
             font-size: 0.8rem;
+            white-space: nowrap;
+        }
+        
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .btn-info:hover {
+            background: #138496;
         }
         
         .btn-warning {
@@ -1053,6 +1271,48 @@ $stats = $penaltySystem->getPenaltyStatistics();
         
         .btn-warning:hover {
             background: #e0a800;
+        }
+        
+        .text-muted {
+            color: #6c757d;
+            font-style: italic;
+        }
+        
+        .guideline-text {
+            display: block;
+            font-size: 0.9rem;
+            color: #495057;
+            line-height: 1.4;
+        }
+        
+        .guideline-text:hover {
+            color: #006633;
+            cursor: help;
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .alert-warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+        }
+        
+        .alert-info {
+            background-color: #d1ecf1;
+            border: 1px solid #17a2b8;
+            color: #0c5460;
+        }
+        
+        .alert i {
+            font-size: 1.2rem;
         }
         
         .modal {
@@ -2069,7 +2329,49 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         function updatePenaltyStatusModal(penaltyId) {
             closePenaltyDetailModal();
-            updatePenaltyStatus(penaltyId, 'Under Review');
+            document.getElementById('status_penalty_id').value = penaltyId;
+            document.getElementById('statusModal').style.display = 'block';
+        }
+
+        // Quick Resolve Modal
+        function quickResolveModal(penaltyId, penaltyType) {
+            document.getElementById('quick_resolve_penalty_id').value = penaltyId;
+            
+            // Pre-select resolution type based on penalty type
+            const resolutionSelect = document.getElementById('quick_resolution_type');
+            if (penaltyType.toLowerCase().includes('damage')) {
+                resolutionSelect.value = 'Repaired';
+            } else if (penaltyType.toLowerCase().includes('loss')) {
+                resolutionSelect.value = 'Replaced';
+            } else {
+                resolutionSelect.value = 'Completed';
+            }
+            
+            document.getElementById('quickResolveModal').style.display = 'block';
+        }
+
+        function closeQuickResolveModal() {
+            document.getElementById('quickResolveModal').style.display = 'none';
+        }
+
+        // Dismiss Penalty Modal
+        function dismissPenaltyModal(penaltyId) {
+            document.getElementById('dismiss_penalty_id').value = penaltyId;
+            document.getElementById('dismissPenaltyModal').style.display = 'block';
+        }
+
+        function closeDismissPenaltyModal() {
+            document.getElementById('dismissPenaltyModal').style.display = 'none';
+        }
+
+        // Process Appeal Modal
+        function processAppealModal(penaltyId) {
+            document.getElementById('process_appeal_penalty_id').value = penaltyId;
+            document.getElementById('processAppealModal').style.display = 'block';
+        }
+
+        function closeProcessAppealModal() {
+            document.getElementById('processAppealModal').style.display = 'none';
         }
 
         function resolvePenalty(penaltyId) {

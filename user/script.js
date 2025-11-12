@@ -115,3 +115,58 @@ document.addEventListener('keypress', function(e) {
         }
     }
 });
+
+// ===== Auto-Refresh on Maintenance Mode Change =====
+let currentMaintenanceState = null;
+
+// Check maintenance mode status every 5 seconds
+function checkMaintenanceStatus() {
+    fetch('check_maintenance.php')
+        .then(response => response.json())
+        .then(data => {
+            // Initialize state on first check
+            if (currentMaintenanceState === null) {
+                currentMaintenanceState = data.maintenance_mode;
+                return;
+            }
+            
+            // If state changed, show notification and reload
+            if (currentMaintenanceState !== data.maintenance_mode) {
+                console.log('Maintenance mode changed. Refreshing page...');
+                
+                // Show brief notification
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: rgba(0, 102, 51, 0.95);
+                    color: white;
+                    padding: 20px 40px;
+                    border-radius: 12px;
+                    font-size: 1.2rem;
+                    font-weight: 600;
+                    z-index: 10000;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+                    text-align: center;
+                `;
+                notification.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> System status updated...';
+                document.body.appendChild(notification);
+                
+                // Reload after brief delay
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            }
+        })
+        .catch(error => {
+            console.error('Error checking maintenance status:', error);
+        });
+}
+
+// Start checking every 5 seconds
+setInterval(checkMaintenanceStatus, 5000);
+
+// Initial check
+checkMaintenanceStatus();

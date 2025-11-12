@@ -68,7 +68,7 @@ $logs_query = "SELECT
                 t.id,
                 t.transaction_type,
                 t.transaction_date,
-                t.return_date,
+                t.actual_return_date,
                 t.expected_return_date,
                 t.status,
                 t.approval_status,
@@ -81,7 +81,7 @@ $logs_query = "SELECT
                 e.name as equipment_name,
                 e.rfid_tag as equipment_rfid,
                 c.name as category_name,
-                CONCAT(a.first_name, ' ', a.last_name) as approved_by_name
+                a.username as approved_by_name
               FROM transactions t
               LEFT JOIN users u ON t.user_id = u.id
               LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag

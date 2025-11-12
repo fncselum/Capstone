@@ -10,6 +10,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 // Include helper function
 require_once 'update_availability_status.php';
+require_once 'includes/email_config.php';
 
 // Database configuration
 $host = "localhost";
@@ -147,6 +148,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
         
         if ($result) {
+            // Check for low stock and send email alert
+            $low_stock_threshold = 5;
+            if ((int)$quantity <= $low_stock_threshold && (int)$quantity > 0) {
+                // Convert PDO to mysqli for email function
+                $mysqli = new mysqli($host, $user, $password, $dbname);
+                if (!$mysqli->connect_error) {
+                    sendLowStockAlert($mysqli, $name, (int)$quantity, $low_stock_threshold);
+                    $mysqli->close();
+                }
+            }
+            
             // Automatically sync with inventory table
             try {
                 $inventory_key = $rfid_tag;

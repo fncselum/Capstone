@@ -1,5 +1,31 @@
 <?php
 session_start();
+
+// Database connection
+$host = "localhost";
+$user = "root";
+$password = "";
+$dbname = "capstone";
+
+$conn = @new mysqli($host, $user, $password, $dbname);
+$maintenance_mode = false;
+
+// Check if maintenance mode is enabled
+if (!$conn->connect_error) {
+    $table_check = $conn->query("SHOW TABLES LIKE 'system_settings'");
+    if ($table_check && $table_check->num_rows > 0) {
+        $stmt = $conn->prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'maintenance_mode'");
+        if ($stmt) {
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($result && $row = $result->fetch_assoc()) {
+                $maintenance_mode = ($row['setting_value'] == '1');
+            }
+            $stmt->close();
+        }
+    }
+    $conn->close();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -32,23 +58,44 @@ session_start();
                 </div>
             </div>
             
-            <!-- RFID Scanner Section -->
+            <!-- RFID Scanner Section or Maintenance Message -->
             <div class="scanner-section">
-                <div class="scanner-card">
-                    <div class="scanner-icon-wrapper">
-                        <i class="fas fa-id-card scanner-icon"></i>
-                        <div class="pulse-ring"></div>
+                <?php if ($maintenance_mode): ?>
+                    <!-- Maintenance Mode Message -->
+                    <div class="scanner-card maintenance-card">
+                        <div class="scanner-icon-wrapper">
+                            <i class="fas fa-tools scanner-icon maintenance-icon"></i>
+                        </div>
+                        
+                        <h2 class="scanner-title maintenance-title">System Under Maintenance</h2>
+                        <p class="scanner-instruction maintenance-text">
+                            We're currently performing scheduled maintenance to improve your experience.
+                            The system will be back online shortly.
+                        </p>
+                        
+                        <div class="maintenance-info">
+                            <p><i class="fas fa-clock"></i> Please check back later</p>
+                            <p><i class="fas fa-envelope"></i> For urgent concerns, contact the administrator</p>
+                        </div>
                     </div>
-                    
-                    <h2 class="scanner-title">Ready to Scan</h2>
-                    <p class="scanner-instruction">Place your RFID card near the scanner</p>
-                    
-                    <!-- Hidden RFID Input (Auto-scan only) -->
-                    <input type="text" id="rfidInput" class="rfid-input" autocomplete="off" autofocus>
-                    
-                    <!-- Status Message -->
-                    <div id="statusMessage" class="status-message"></div>
-                </div>
+                <?php else: ?>
+                    <!-- Normal Scanner Interface -->
+                    <div class="scanner-card">
+                        <div class="scanner-icon-wrapper">
+                            <i class="fas fa-id-card scanner-icon"></i>
+                            <div class="pulse-ring"></div>
+                        </div>
+                        
+                        <h2 class="scanner-title">Ready to Scan</h2>
+                        <p class="scanner-instruction">Place your RFID card near the scanner</p>
+                        
+                        <!-- Hidden RFID Input (Auto-scan only) -->
+                        <input type="text" id="rfidInput" class="rfid-input" autocomplete="off" autofocus>
+                        
+                        <!-- Status Message -->
+                        <div id="statusMessage" class="status-message"></div>
+                    </div>
+                <?php endif; ?>
                 
                 <!-- Quick Stats -->
                 <div class="quick-stats">

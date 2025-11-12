@@ -46,14 +46,20 @@ $stats = ['total' => 0, 'unread' => 0, 'read' => 0, 'archived' => 0];
 if ($table_exists) {
     // Get statistics
     $stats_query = "SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END) as unread,
-        SUM(CASE WHEN status = 'read' THEN 1 ELSE 0 END) as read,
-        SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) as archived
+        COUNT(*) AS total,
+        SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END) AS unread_count,
+        SUM(CASE WHEN status = 'read' THEN 1 ELSE 0 END) AS read_count,
+        SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archived_count
         FROM notifications";
     $stats_result = $conn->query($stats_query);
     if ($stats_result) {
-        $stats = $stats_result->fetch_assoc();
+        $stats_row = $stats_result->fetch_assoc();
+        $stats = [
+            'total' => (int)($stats_row['total'] ?? 0),
+            'unread' => (int)($stats_row['unread_count'] ?? 0),
+            'read' => (int)($stats_row['read_count'] ?? 0),
+            'archived' => (int)($stats_row['archived_count'] ?? 0),
+        ];
     }
 
     // Build SQL query with filters

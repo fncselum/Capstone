@@ -728,3 +728,64 @@ body {
         font-size: 1.4rem;
     }
 }
+
+/* ===== Maintenance Mode Styles ===== */
+.maintenance-card {
+    background: linear-gradient(135deg, #fff8e1 0%, #fffbf0 100%) !important;
+    border: 2px solid #ff9800 !important;
+}
+
+.maintenance-icon {
+    color: #ff9800 !important;
+    animation: rotate 3s linear infinite;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.maintenance-title {
+    color: #e65100 !important;
+    font-size: 2.2rem;
+    margin-bottom: 15px;
+}
+
+.maintenance-text {
+    color: #f57c00;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    margin-bottom: 25px;
+}
+
+.maintenance-info {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(255, 152, 0, 0.1);
+    border-radius: 12px;
+    border-left: 4px solid #ff9800;
+}
+
+.maintenance-info p {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #e65100;
+    font-size: 1rem;
+    margin: 12px 0;
+    font-weight: 500;
+}
+
+.maintenance-info i {
+    color: #ff9800;
+    font-size: 1.2rem;
+}
+
+/* Remove pulse animation in maintenance mode */
+.maintenance-card .pulse-ring {
+    display: none;
+}

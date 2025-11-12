@@ -2,6 +2,9 @@
 session_start();
 header('Content-Type: application/json');
 
+// Include email configuration
+require_once '../admin/includes/email_config.php';
+
 // Database connection
 $host = "localhost";
 $user = "root";
@@ -108,6 +111,19 @@ if ($result->num_rows > 0) {
     ]);
 } else {
     // User not found - Reject unauthorized access
+    // Send email alert to admin about unauthorized access attempt
+    $attemptTime = date('F j, Y g:i A');
+    sendUnauthorizedAccessAlert($conn, $rfid, $attemptTime);
+    
+    // Log unauthorized access attempt
+    $log_stmt = $conn->prepare("INSERT INTO unauthorized_access_logs (rfid_tag, attempt_time, ip_address) VALUES (?, NOW(), ?)");
+    if ($log_stmt) {
+        $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+        $log_stmt->bind_param("ss", $rfid, $ip_address);
+        $log_stmt->execute();
+        $log_stmt->close();
+    }
+    
     echo json_encode([
         'success' => false,
         'message' => 'RFID not authorized. Please contact the administrator to register your account.'

@@ -120,10 +120,11 @@ if ($db_connected) {
     
     // Low Stock Items (quantity <= 5)
     $result = $conn->query("
-        SELECT id, name, rfid_tag, quantity, category
-        FROM equipment
-        WHERE quantity <= 5 AND quantity > 0
-        ORDER BY quantity ASC
+        SELECT e.id, e.name, e.rfid_tag, e.quantity, c.name AS category_name
+        FROM equipment e
+        LEFT JOIN categories c ON c.id = e.category_id
+        WHERE e.quantity <= 5 AND e.quantity > 0
+        ORDER BY e.quantity ASC
         LIMIT 5
     ");
     if ($result) {
@@ -209,7 +210,7 @@ if ($db_connected) {
                                     $borrowed_count = 0;
                                     $check_transactions = $conn->query("SHOW TABLES LIKE 'transactions'");
                                     if ($check_transactions && $check_transactions->num_rows > 0) {
-                                        $borrowed_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE type = 'Borrow'");
+                                        $borrowed_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_type = 'Borrow'");
                                         if ($borrowed_query) {
                                             $borrowed_count = $borrowed_query->fetch_assoc()['count'];
                                         }
@@ -230,7 +231,7 @@ if ($db_connected) {
                                     <?php 
                                     $returned_count = 0;
                                     if ($check_transactions && $check_transactions->num_rows > 0) {
-                                        $returned_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE type = 'Return'");
+                                        $returned_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_type = 'Return'");
                                         if ($returned_query) {
                                             $returned_count = $returned_query->fetch_assoc()['count'];
                                         }
@@ -252,15 +253,15 @@ if ($db_connected) {
                                     $violations_count = 0;
                                     if ($check_transactions && $check_transactions->num_rows > 0) {
                                         // Check if transactions table exists and has the required columns
-                                        $check_columns = $conn->query("SHOW COLUMNS FROM transactions LIKE 'expected_return_date'");
-                                        if ($check_columns && $check_columns->num_rows > 0) {
-                                            $violations_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE type = 'Borrow' AND (expected_return_date < CURDATE() OR return_condition = 'Damaged')");
+                                        $check_columns = $conn->query("SHOW COLUMNS FROM transactions WHERE Field IN ('expected_return_date', 'condition_after')");
+                                        if ($check_columns && $check_columns->num_rows === 2) {
+                                            $violations_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_type = 'Borrow' AND (expected_return_date < CURDATE() OR condition_after = 'Damaged')");
                                             if ($violations_query) {
                                                 $violations_count = $violations_query->fetch_assoc()['count'];
                                             }
                                         } else {
                                             // Fallback: just count borrowed items if columns don't exist
-                                            $violations_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE type = 'Borrow'");
+                                            $violations_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_type = 'Borrow'");
                                             if ($violations_query) {
                                                 $violations_count = $violations_query->fetch_assoc()['count'];
                                             }
@@ -422,7 +423,7 @@ if ($db_connected) {
                             "SELECT e.id AS equipment_id, e.name AS equipment_name, e.image_path, COUNT(*) AS borrow_count\n" .
                             "FROM transactions t\n" .
                             "JOIN equipment e ON t.equipment_id = e.id\n" .
-                            "WHERE t.type = 'Borrow'\n" .
+                            "WHERE t.transaction_type = 'Borrow'\n" .
                             "GROUP BY t.equipment_id\n" .
                             "ORDER BY borrow_count DESC\n" .
                             "LIMIT 1";
@@ -432,20 +433,21 @@ if ($db_connected) {
 
                             // Get latest RFID that borrowed this equipment (represents user RFID)
                             $latest_rfid_rs = $conn->query(
-                                "SELECT rfid_id FROM transactions\n" .
-                                "WHERE type = 'Borrow' AND equipment_id = " . (int)$top_item['equipment_id'] . "\n" .
-                                "ORDER BY transaction_date DESC\n" .
+                                "SELECT u.rfid_tag FROM transactions t\n" .
+                                "LEFT JOIN users u ON t.user_id = u.id\n" .
+                                "WHERE t.transaction_type = 'Borrow' AND t.equipment_id = " . (int)$top_item['equipment_id'] . "\n" .
+                                "ORDER BY t.transaction_date DESC\n" .
                                 "LIMIT 1"
                             );
                             if ($latest_rfid_rs && $latest_rfid_rs->num_rows > 0) {
-                                $latest_rfid_for_top = $latest_rfid_rs->fetch_assoc()['rfid_id'];
+                                $latest_rfid_for_top = $latest_rfid_rs->fetch_assoc()['rfid_tag'];
                             }
 
                             // Prepare current month per-day usage for this equipment
                             $usage_rs = $conn->query(
                                 "SELECT DATE(transaction_date) AS d, COUNT(*) AS c\n" .
                                 "FROM transactions\n" .
-                                "WHERE type = 'Borrow'\n" .
+                                "WHERE transaction_type = 'Borrow'\n" .
                                 "  AND equipment_id = " . (int)$top_item['equipment_id'] . "\n" .
                                 "  AND MONTH(transaction_date) = MONTH(CURDATE())\n" .
                                 "  AND YEAR(transaction_date) = YEAR(CURDATE())\n" .

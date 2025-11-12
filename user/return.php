@@ -303,19 +303,20 @@ if ($db_connected) {
 							$comparisonWarnings = $comparisonResults['warnings'];
 						}
 
-						$metaPayload = [
-							'version' => '2.1',
-							'results' => $comparisonResults,
-						];
-						$metaStmt = $conn->prepare("INSERT INTO transaction_meta (transaction_id, meta_key, meta_value, created_at)
-							VALUES (?, 'image_comparison', ?, NOW())
-							ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = NOW()");
-						if ($metaStmt) {
-							$metaJson = json_encode($metaPayload);
-							$metaStmt->bind_param('is', $transaction_id, $metaJson);
-							$metaStmt->execute();
-							$metaStmt->close();
-						}
+						// Optional: Store metadata (transaction_meta table not required)
+						// $metaPayload = [
+						// 	'version' => '2.1',
+						// 	'results' => $comparisonResults,
+						// ];
+						// $metaStmt = $conn->prepare("INSERT INTO transaction_meta (transaction_id, meta_key, meta_value, created_at)
+						// 	VALUES (?, 'image_comparison', ?, NOW())
+						// 	ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = NOW()");
+						// if ($metaStmt) {
+						// 	$metaJson = json_encode($metaPayload);
+						// 	$metaStmt->bind_param('is', $transaction_id, $metaJson);
+						// 	$metaStmt->execute();
+						// 	$metaStmt->close();
+						// }
 
 						if (!empty($comparisonResults['success'])) {
 							$similarityScore = $comparisonResults['similarity'] ?? null;

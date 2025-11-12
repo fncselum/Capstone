@@ -16,6 +16,8 @@ $adminName = $_SESSION['admin_username'] ?? 'Admin';
 
 $month = isset($_GET['month']) ? (int)$_GET['month'] : (int)date('n');
 $year = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y');
+$period = isset($_GET['period']) ? $_GET['period'] : 'monthly';
+$date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
 
 $rows = [];
 $equipmentSummary = [];
@@ -30,6 +32,35 @@ $totals = [
 ];
 
 if (!$conn->connect_error) {
+    // Build WHERE clause based on period
+    $whereClause = '';
+    $params = [];
+    $types = '';
+    
+    switch($period) {
+        case 'daily':
+            $whereClause = "DATE(COALESCE(t.transaction_date, t.created_at)) = ?";
+            $params[] = $date;
+            $types = 's';
+            break;
+        case 'weekly':
+            $whereClause = "YEARWEEK(COALESCE(t.transaction_date, t.created_at), 1) = YEARWEEK(?, 1)";
+            $params[] = $date;
+            $types = 's';
+            break;
+        case 'monthly':
+            $whereClause = "MONTH(COALESCE(t.transaction_date, t.created_at)) = ? AND YEAR(COALESCE(t.transaction_date, t.created_at)) = ?";
+            $params[] = $month;
+            $params[] = $year;
+            $types = 'ii';
+            break;
+        case 'yearly':
+            $whereClause = "YEAR(COALESCE(t.transaction_date, t.created_at)) = ?";
+            $params[] = $year;
+            $types = 'i';
+            break;
+    }
+    
     $stmt = $conn->prepare("SELECT t.*, 
                                     COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
                                     e.name AS equipment_name,
@@ -38,11 +69,16 @@ if (!$conn->connect_error) {
                              FROM transactions t
                              LEFT JOIN equipment e ON t.equipment_id = e.id
                              LEFT JOIN users u ON t.user_id = u.id
-                             WHERE MONTH(COALESCE(t.transaction_date, t.created_at)) = ?
-                               AND YEAR(COALESCE(t.transaction_date, t.created_at)) = ?
+                             WHERE $whereClause
                              ORDER BY txn_datetime ASC");
     if ($stmt) {
-        $stmt->bind_param('ii', $month, $year);
+        if ($types === 's') {
+            $stmt->bind_param($types, $params[0]);
+        } elseif ($types === 'i') {
+            $stmt->bind_param($types, $params[0]);
+        } elseif ($types === 'ii') {
+            $stmt->bind_param($types, $params[0], $params[1]);
+        }
         $stmt->execute();
         $result = $stmt->get_result();
         while ($r = $result->fetch_assoc()) {
@@ -95,15 +131,37 @@ if (!$conn->connect_error) {
         $stmt->close();
     }
     
-    // Count penalty records for each equipment
+    // Count penalty records for each equipment based on period
+    $penaltyWhereClause = '';
+    switch($period) {
+        case 'daily':
+            $penaltyWhereClause = "DATE(p.created_at) = ?";
+            break;
+        case 'weekly':
+            $penaltyWhereClause = "YEARWEEK(p.created_at, 1) = YEARWEEK(?, 1)";
+            break;
+        case 'monthly':
+            $penaltyWhereClause = "MONTH(p.created_at) = ? AND YEAR(p.created_at) = ?";
+            break;
+        case 'yearly':
+            $penaltyWhereClause = "YEAR(p.created_at) = ?";
+            break;
+    }
+    
     $penaltyStmt = $conn->prepare("SELECT e.rfid_tag, COUNT(p.id) as penalty_count
                                      FROM penalties p
                                      INNER JOIN transactions t ON p.transaction_id = t.id
                                      INNER JOIN equipment e ON t.equipment_id = e.id
-                                     WHERE MONTH(p.created_at) = ? AND YEAR(p.created_at) = ?
+                                     WHERE $penaltyWhereClause
                                      GROUP BY e.rfid_tag");
     if ($penaltyStmt) {
-        $penaltyStmt->bind_param('ii', $month, $year);
+        if ($types === 's') {
+            $penaltyStmt->bind_param($types, $params[0]);
+        } elseif ($types === 'i') {
+            $penaltyStmt->bind_param($types, $params[0]);
+        } elseif ($types === 'ii') {
+            $penaltyStmt->bind_param($types, $params[0], $params[1]);
+        }
         $penaltyStmt->execute();
         $penaltyResult = $penaltyStmt->get_result();
         while ($pRow = $penaltyResult->fetch_assoc()) {
@@ -132,11 +190,171 @@ usort($equipmentSummaryList, function($a, $b) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <style>
         @media print {
-            .no-print { display:none !important; }
-            .main-content { margin:0 !important; padding: 20px !important; }
-            .summary-grid { grid-template-columns: repeat(2, 1fr); }
-            .top-header { page-break-after: avoid; }
-            .panel { page-break-inside: avoid; }
+            /* Hide navigation and controls */
+            .no-print, .admin-sidebar, .sidebar { display:none !important; }
+            
+            /* Reset page layout */
+            body {
+                margin: 0;
+                padding: 0;
+                background: white !important;
+            }
+            
+            .admin-container {
+                display: block !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            
+            .main-content { 
+                margin: 0 !important; 
+                padding: 0 !important;
+                max-width: 100% !important;
+                width: 100% !important;
+            }
+            
+            /* Document header styling */
+            .top-header {
+                background: white !important;
+                border: none !important;
+                border-bottom: 3px solid #006633 !important;
+                padding: 30px 40px !important;
+                margin: 0 0 30px 0 !important;
+                page-break-after: avoid;
+                text-align: center;
+            }
+            
+            .page-title {
+                color: #006633 !important;
+                font-size: 2rem !important;
+                font-weight: 700 !important;
+                margin-bottom: 10px !important;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            
+            .top-header > div:first-child {
+                text-align: center !important;
+            }
+            
+            /* Content section */
+            .content-section {
+                padding: 0 40px 40px 40px !important;
+            }
+            
+            /* Summary cards in print */
+            .summary-grid { 
+                grid-template-columns: repeat(3, 1fr);
+                gap: 15px;
+                margin-bottom: 30px;
+                page-break-inside: avoid;
+            }
+            
+            .summary-card {
+                box-shadow: none !important;
+                border: 2px solid #e0e0e0 !important;
+                border-radius: 8px !important;
+                padding: 15px !important;
+                background: white !important;
+                page-break-inside: avoid;
+            }
+            
+            .summary-card h3 {
+                font-size: 0.9rem !important;
+                color: #666 !important;
+                margin-bottom: 8px !important;
+            }
+            
+            .summary-card strong {
+                font-size: 1.5rem !important;
+                color: #006633 !important;
+            }
+            
+            /* Panel styling */
+            .panel { 
+                page-break-inside: avoid;
+                box-shadow: none !important;
+                border: 2px solid #e0e0e0 !important;
+                border-radius: 8px !important;
+                margin-bottom: 25px !important;
+                background: white !important;
+            }
+            
+            .panel h3 {
+                background: #f5f5f5 !important;
+                color: #006633 !important;
+                padding: 12px 15px !important;
+                margin: 0 !important;
+                border-bottom: 2px solid #e0e0e0 !important;
+                font-size: 1.1rem !important;
+            }
+            
+            /* Table styling */
+            table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+                font-size: 0.85rem !important;
+                margin: 0 !important;
+            }
+            
+            thead {
+                background: #006633 !important;
+                color: white !important;
+            }
+            
+            thead th {
+                padding: 10px 8px !important;
+                text-align: left !important;
+                font-weight: 600 !important;
+                border: 1px solid #005522 !important;
+            }
+            
+            tbody td {
+                padding: 8px !important;
+                border: 1px solid #ddd !important;
+            }
+            
+            tbody tr:nth-child(even) {
+                background: #f9f9f9 !important;
+            }
+            
+            tbody tr:nth-child(odd) {
+                background: white !important;
+            }
+            
+            /* Badge styling for print */
+            .badge {
+                padding: 3px 8px !important;
+                border-radius: 4px !important;
+                font-size: 0.75rem !important;
+                font-weight: 600 !important;
+                display: inline-block !important;
+            }
+            
+            .badge.borrow {
+                background: #e3f2fd !important;
+                color: #1976d2 !important;
+                border: 1px solid #1976d2 !important;
+            }
+            
+            .badge.return {
+                background: #e8f5e9 !important;
+                color: #388e3c !important;
+                border: 1px solid #388e3c !important;
+            }
+            
+            /* Page breaks */
+            .section-header {
+                page-break-after: avoid;
+            }
+            
+            /* Footer for pages */
+            @page {
+                margin: 1.5cm;
+                @bottom-right {
+                    content: "Page " counter(page) " of " counter(pages);
+                }
+            }
         }
         
         .filters { 
@@ -372,6 +590,12 @@ usort($equipmentSummaryList, function($a, $b) {
             box-shadow: 0 4px 12px rgba(0,102,51,0.3);
         }
         
+        .extract-btn.active {
+            background: #006633;
+            color: white;
+            font-weight: 700;
+        }
+        
         .extract-btn i {
             font-size: 1rem;
         }
@@ -560,9 +784,29 @@ usort($equipmentSummaryList, function($a, $b) {
         <main class="main-content">
             <header class="top-header" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
                 <div>
-                    <h1 class="page-title" style="margin-bottom:4px;">Monthly Report</h1>
+                    <?php
+                        $periodLabel = ucfirst($period) . ' Report';
+                        $periodDisplay = '';
+                        switch($period) {
+                            case 'daily':
+                                $periodDisplay = date('F j, Y', strtotime($date));
+                                break;
+                            case 'weekly':
+                                $weekStart = date('M j', strtotime($date . ' -' . date('w', strtotime($date)) . ' days'));
+                                $weekEnd = date('M j, Y', strtotime($date . ' +' . (6 - date('w', strtotime($date))) . ' days'));
+                                $periodDisplay = "Week of $weekStart - $weekEnd";
+                                break;
+                            case 'monthly':
+                                $periodDisplay = date('F', mktime(0,0,0,$month,1,$year)) . ' ' . $year;
+                                break;
+                            case 'yearly':
+                                $periodDisplay = $year;
+                                break;
+                        }
+                    ?>
+                    <h1 class="page-title" style="margin-bottom:4px;"><?= $periodLabel ?></h1>
                     <div style="color:#555; font-size:0.95rem;">
-                        Period: <strong><?= date('F', mktime(0,0,0,$month,1,$year)) ?> <?= $year ?></strong>
+                        Period: <strong><?= $periodDisplay ?></strong>
                         &nbsp;•&nbsp; Prepared by: <strong><?= htmlspecialchars($adminName) ?></strong>
                         &nbsp;•&nbsp; Generated: <strong><?= date('M j, Y g:i A') ?></strong>
                     </div>
@@ -571,47 +815,58 @@ usort($equipmentSummaryList, function($a, $b) {
                     <button class="add-btn" onclick="window.print()" style="background: #9c27b0;">
                         <i class="fas fa-print"></i> Print Report
                     </button>
-                    <button class="add-btn" onclick="exportToCSV()" style="background: #4caf50;">
-                        <i class="fas fa-file-csv"></i> Export CSV
+                    <button class="add-btn" onclick="exportToWord()" style="background: #2b579a;">
+                        <i class="fas fa-file-word"></i> Export Word
                     </button>
-                    <button class="add-btn" onclick="exportToExcel()" style="background: #2196f3;">
+                    <button class="add-btn" onclick="exportToExcel()" style="background: #217346;">
                         <i class="fas fa-file-excel"></i> Export Excel
                     </button>
                 </div>
             </header>
 
             <section class="content-section active">
-                <div class="section-header no-print" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                    <h2>Filters & Extract Reports</h2>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button class="extract-btn" onclick="extractReport('daily')" title="Extract Daily Report">
-                            <i class="fas fa-calendar-day"></i> Daily
-                        </button>
-                        <button class="extract-btn" onclick="extractReport('weekly')" title="Extract Weekly Report">
-                            <i class="fas fa-calendar-week"></i> Weekly
-                        </button>
-                        <button class="extract-btn" onclick="extractReport('monthly')" title="Extract Monthly Report">
-                            <i class="fas fa-calendar-alt"></i> Monthly
-                        </button>
-                        <button class="extract-btn" onclick="extractReport('yearly')" title="Extract Yearly Report">
-                            <i class="fas fa-calendar"></i> Yearly
-                        </button>
+                <div class="section-header no-print" style="margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; width: 100%;">
+                        <form class="filters" method="GET" style="display: flex; align-items: center; gap: 10px; margin: 0; flex: 1; justify-content: flex-start;">
+                            <input type="hidden" name="period" value="<?= htmlspecialchars($period) ?>">
+                            
+                            <?php if ($period === 'daily' || $period === 'weekly'): ?>
+                                <input type="date" name="date" value="<?= htmlspecialchars($date) ?>" style="padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem;">
+                            <?php endif; ?>
+                            
+                            <?php if ($period === 'monthly'): ?>
+                                <select name="month">
+                                    <?php for($m=1;$m<=12;$m++): ?>
+                                        <option value="<?= $m ?>" <?= $m===$month? 'selected':'' ?>><?= date('F', mktime(0,0,0,$m,1,$year)) ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                            <?php endif; ?>
+                            
+                            <?php if ($period === 'monthly' || $period === 'yearly'): ?>
+                                <select name="year">
+                                    <?php for($y=date('Y')-4;$y<=date('Y')+1;$y++): ?>
+                                        <option value="<?= $y ?>" <?= $y===$year? 'selected':'' ?>><?= $y ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                            <?php endif; ?>
+                            
+                            <button class="add-btn" type="submit"><i class="fas fa-filter"></i> Apply</button>
+                        </form>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="extract-btn <?= $period === 'daily' ? 'active' : '' ?>" onclick="extractReport('daily')" title="Extract Daily Report">
+                                <i class="fas fa-calendar-day"></i> Daily
+                            </button>
+                            <button class="extract-btn <?= $period === 'weekly' ? 'active' : '' ?>" onclick="extractReport('weekly')" title="Extract Weekly Report">
+                                <i class="fas fa-calendar-week"></i> Weekly
+                            </button>
+                            <button class="extract-btn <?= $period === 'monthly' ? 'active' : '' ?>" onclick="extractReport('monthly')" title="Extract Monthly Report">
+                                <i class="fas fa-calendar-alt"></i> Monthly
+                            </button>
+                            <button class="extract-btn <?= $period === 'yearly' ? 'active' : '' ?>" onclick="extractReport('yearly')" title="Extract Yearly Report">
+                                <i class="fas fa-calendar"></i> Yearly
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <div class="no-print" style="margin-top: 15px;">
-                    <form class="filters" method="GET">
-                        <select name="month">
-                            <?php for($m=1;$m<=12;$m++): ?>
-                                <option value="<?= $m ?>" <?= $m===$month? 'selected':'' ?>><?= date('F', mktime(0,0,0,$m,1,$year)) ?></option>
-                            <?php endfor; ?>
-                        </select>
-                        <select name="year">
-                            <?php for($y=date('Y')-4;$y<=date('Y')+1;$y++): ?>
-                                <option value="<?= $y ?>" <?= $y===$year? 'selected':'' ?>><?= $y ?></option>
-                            <?php endfor; ?>
-                        </select>
-                        <button class="add-btn" type="submit"><i class="fas fa-filter"></i> Apply</button>
-                    </form>
                 </div>
 
                 <div class="summary-grid">
@@ -782,72 +1037,162 @@ usort($equipmentSummaryList, function($a, $b) {
             }, 300);
         }
         
-        // Export to CSV
-        function exportToCSV() {
-            const month = <?= $month ?>;
-            const year = <?= $year ?>;
-            const monthName = '<?= date('F', mktime(0,0,0,$month,1,$year)) ?>';
+        // Export to Word Document
+        function exportToWord() {
+            const period = '<?= $period ?>';
+            const periodLabel = '<?= ucfirst($period) ?> Report';
+            const periodDisplay = '<?= $periodDisplay ?>';
+            const adminName = '<?= htmlspecialchars($adminName) ?>';
             
-            let csv = 'Equipment Kiosk System - Monthly Report\\n';
-            csv += 'Period: ' + monthName + ' ' + year + '\\n';
-            csv += 'Generated: <?= date('M j, Y g:i A') ?>\\n\\n';
+            let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+            html += '<head><meta charset="UTF-8">';
+            html += '<style>';
+            html += 'body { font-family: Calibri, Arial, sans-serif; margin: 40px; line-height: 1.6; }';
+            html += '.header { text-align: center; border-bottom: 4px solid #006633; padding-bottom: 20px; margin-bottom: 30px; }';
+            html += '.header h1 { color: #006633; font-size: 28px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 10px 0; }';
+            html += '.header h2 { color: #006633; font-size: 20px; font-weight: bold; margin: 5px 0; }';
+            html += '.info-section { margin: 30px 0; padding: 15px; background: #f9f9f9; border-left: 4px solid #006633; }';
+            html += '.info-row { margin: 8px 0; }';
+            html += '.info-label { font-weight: bold; color: #333; display: inline-block; width: 150px; }';
+            html += '.info-value { color: #666; }';
+            html += '.section-title { background: #006633; color: white; padding: 12px 15px; font-size: 16px; font-weight: bold; margin: 30px 0 15px 0; text-transform: uppercase; }';
+            html += 'table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }';
+            html += 'th { background: #006633; color: white; padding: 12px 10px; text-align: left; font-weight: bold; border: 1px solid #005522; }';
+            html += 'td { border: 1px solid #ddd; padding: 10px; }';
+            html += 'tr:nth-child(even) { background: #f9f9f9; }';
+            html += 'tr:nth-child(odd) { background: white; }';
+            html += '.summary-value { font-weight: bold; color: #006633; font-size: 16px; }';
+            html += '.footer { margin-top: 50px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; color: #999; font-size: 12px; }';
+            html += '</style>';
+            html += '</head><body>';
             
-            // Summary
-            csv += 'SUMMARY\\n';
-            csv += 'Total Borrowed,<?= $totals['borrowed_quantity'] ?>\\n';
-            csv += 'Total Returned,<?= $totals['returned_quantity'] ?>\\n';
-            csv += 'Damaged Items,<?= $totals['damaged_returns'] ?>\\n';
-            csv += 'Currently Borrowed,<?= $totals['currently_borrowed'] ?>\\n';
-            csv += 'Penalty Records,<?= $totals['penalty_records'] ?>\\n\\n';
+            // Professional Header
+            html += '<div class="header">';
+            html += '<h1>EQUIPMENT KIOSK SYSTEM</h1>';
+            html += '<h2>' + periodLabel.toUpperCase() + '</h2>';
+            html += '</div>';
             
-            // Equipment Summary
-            csv += 'EQUIPMENT SUMMARY\\n';
-            csv += 'RFID Tag,Equipment,Borrowed Qty,Returned Qty,Damaged Qty,Currently Borrowed,Penalty Records\\n';
+            // Report Information
+            html += '<div class="info-section">';
+            html += '<div class="info-row"><span class="info-label">Period:</span><span class="info-value">' + periodDisplay + '</span></div>';
+            html += '<div class="info-row"><span class="info-label">Prepared by:</span><span class="info-value">' + adminName + '</span></div>';
+            html += '<div class="info-row"><span class="info-label">Generated:</span><span class="info-value"><?= date('M j, Y g:i A') ?></span></div>';
+            html += '</div>';
+            
+            // Summary Section
+            html += '<div class="section-title">Summary Statistics</div>';
+            html += '<table>';
+            html += '<tr><th style="width: 60%;">Metric</th><th style="width: 40%;">Value</th></tr>';
+            html += '<tr><td>Total Borrowed</td><td class="summary-value"><?= $totals['borrowed_quantity'] ?></td></tr>';
+            html += '<tr><td>Total Returned</td><td class="summary-value"><?= $totals['returned_quantity'] ?></td></tr>';
+            html += '<tr><td>Damaged Items</td><td class="summary-value"><?= $totals['damaged_returns'] ?></td></tr>';
+            html += '<tr><td>Currently Borrowed</td><td class="summary-value"><?= $totals['currently_borrowed'] ?></td></tr>';
+            html += '<tr><td>Penalty Records</td><td class="summary-value"><?= $totals['penalty_records'] ?></td></tr>';
+            html += '</table>';
+            
+            // Equipment Breakdown Section
+            html += '<div class="section-title">Equipment Breakdown</div>';
+            html += '<table>';
+            html += '<tr><th>RFID Tag</th><th>Equipment Name</th><th>Borrowed</th><th>Returned</th><th>Damaged</th><th>Current</th><th>Penalties</th></tr>';
             <?php foreach($equipmentSummaryList as $item): ?>
-            csv += '<?= addslashes($item['rfid']) ?>,<?= addslashes($item['equipment_name']) ?>,<?= $item['borrowed_quantity'] ?>,<?= $item['returned_quantity'] ?>,<?= $item['damaged_returns'] ?>,<?= $item['currently_borrowed'] ?>,<?= $item['penalty_records'] ?>\\n';
+            html += '<tr>';
+            html += '<td><?= htmlspecialchars($item['rfid']) ?></td>';
+            html += '<td><?= htmlspecialchars($item['equipment_name']) ?></td>';
+            html += '<td><?= $item['borrowed_quantity'] ?></td>';
+            html += '<td><?= $item['returned_quantity'] ?></td>';
+            html += '<td><?= $item['damaged_returns'] ?></td>';
+            html += '<td><?= $item['currently_borrowed'] ?></td>';
+            html += '<td><?= $item['penalty_records'] ?></td>';
+            html += '</tr>';
             <?php endforeach; ?>
+            html += '</table>';
             
-            // Download
-            const blob = new Blob([csv], { type: 'text/csv' });
+            // Footer
+            html += '<div class="footer">';
+            html += '<p>This is an official report generated by the Equipment Kiosk System.</p>';
+            html += '<p>© ' + new Date().getFullYear() + ' Equipment Kiosk System. All rights reserved.</p>';
+            html += '</div>';
+            
+            html += '</body></html>';
+            
+            const blob = new Blob([html], { type: 'application/msword' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'Report_' + monthName + '_' + year + '.csv';
+            const filename = 'Report_' + period + '_' + periodDisplay.replace(/[^a-zA-Z0-9]/g, '_') + '.doc';
+            a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
             
             // Show success notification
-            showToast('CSV Export Successful', 'Report has been downloaded as ' + monthName + '_' + year + '.csv', 'success');
+            showToast('Word Export Successful', 'Report has been downloaded as ' + filename, 'success');
         }
         
         // Export to Excel (HTML table format)
         function exportToExcel() {
-            const month = <?= $month ?>;
-            const year = <?= $year ?>;
-            const monthName = '<?= date('F', mktime(0,0,0,$month,1,$year)) ?>';
+            const period = '<?= $period ?>';
+            const periodLabel = '<?= ucfirst($period) ?> Report';
+            const periodDisplay = '<?= $periodDisplay ?>';
+            const adminName = '<?= htmlspecialchars($adminName) ?>';
             
             let html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel">';
-            html += '<head><meta charset="UTF-8"><style>table {border-collapse: collapse;} th, td {border: 1px solid #ddd; padding: 8px;} th {background: #006633; color: white;}</style></head>';
-            html += '<body>';
-            html += '<h1>Equipment Kiosk System - Monthly Report</h1>';
-            html += '<p><strong>Period:</strong> ' + monthName + ' ' + year + '</p>';
-            html += '<p><strong>Generated:</strong> <?= date('M j, Y g:i A') ?></p>';
+            html += '<head><meta charset="UTF-8">';
+            html += '<style>';
+            html += 'body { font-family: Arial, sans-serif; margin: 40px; }';
+            html += '.header { text-align: center; border-bottom: 3px solid #006633; padding-bottom: 20px; margin-bottom: 30px; }';
+            html += '.header h1 { color: #006633; font-size: 24px; text-transform: uppercase; letter-spacing: 1px; margin: 0; }';
+            html += '.header h2 { color: #006633; font-size: 18px; margin: 5px 0; }';
+            html += '.info-table { margin-bottom: 30px; border: none; }';
+            html += '.info-table td { padding: 5px 10px; border: none; }';
+            html += '.info-label { font-weight: bold; color: #666; }';
+            html += '.section-title { background: #f5f5f5; color: #006633; padding: 12px; font-size: 16px; font-weight: bold; border: 2px solid #e0e0e0; margin-top: 20px; }';
+            html += 'table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }';
+            html += 'th { background: #006633; color: white; padding: 12px 8px; text-align: left; font-weight: bold; border: 1px solid #005522; }';
+            html += 'td { border: 1px solid #ddd; padding: 10px 8px; }';
+            html += 'tr:nth-child(even) { background: #f9f9f9; }';
+            html += 'tr:nth-child(odd) { background: white; }';
+            html += '.summary-value { font-weight: bold; color: #006633; }';
+            html += '</style>';
+            html += '</head><body>';
             
-            // Summary
-            html += '<h2>Summary</h2>';
-            html += '<table><tr><th>Metric</th><th>Value</th></tr>';
-            html += '<tr><td>Total Borrowed</td><td><?= $totals['borrowed_quantity'] ?></td></tr>';
-            html += '<tr><td>Total Returned</td><td><?= $totals['returned_quantity'] ?></td></tr>';
-            html += '<tr><td>Damaged Items</td><td><?= $totals['damaged_returns'] ?></td></tr>';
-            html += '<tr><td>Currently Borrowed</td><td><?= $totals['currently_borrowed'] ?></td></tr>';
-            html += '<tr><td>Penalty Records</td><td><?= $totals['penalty_records'] ?></td></tr>';
-            html += '</table><br>';
+            // Professional Header
+            html += '<div class="header">';
+            html += '<h1>EQUIPMENT KIOSK SYSTEM</h1>';
+            html += '<h2>' + periodLabel.toUpperCase() + '</h2>';
+            html += '</div>';
             
-            // Equipment Summary
-            html += '<h2>Equipment Summary</h2>';
-            html += '<table><tr><th>RFID Tag</th><th>Equipment</th><th>Borrowed Qty</th><th>Returned Qty</th><th>Damaged Qty</th><th>Currently Borrowed</th><th>Penalty Records</th></tr>';
+            // Report Information
+            html += '<table class="info-table">';
+            html += '<tr><td class="info-label">Period:</td><td>' + periodDisplay + '</td></tr>';
+            html += '<tr><td class="info-label">Prepared by:</td><td>' + adminName + '</td></tr>';
+            html += '<tr><td class="info-label">Generated:</td><td><?= date('M j, Y g:i A') ?></td></tr>';
+            html += '</table>';
+            
+            // Summary Section
+            html += '<div class="section-title">SUMMARY STATISTICS</div>';
+            html += '<table>';
+            html += '<tr><th>Metric</th><th>Value</th></tr>';
+            html += '<tr><td>Total Borrowed</td><td class="summary-value"><?= $totals['borrowed_quantity'] ?></td></tr>';
+            html += '<tr><td>Total Returned</td><td class="summary-value"><?= $totals['returned_quantity'] ?></td></tr>';
+            html += '<tr><td>Damaged Items</td><td class="summary-value"><?= $totals['damaged_returns'] ?></td></tr>';
+            html += '<tr><td>Currently Borrowed</td><td class="summary-value"><?= $totals['currently_borrowed'] ?></td></tr>';
+            html += '<tr><td>Penalty Records</td><td class="summary-value"><?= $totals['penalty_records'] ?></td></tr>';
+            html += '</table>';
+            
+            // Equipment Breakdown Section
+            html += '<div class="section-title">EQUIPMENT BREAKDOWN</div>';
+            html += '<table>';
+            html += '<tr><th>RFID Tag</th><th>Equipment Name</th><th>Borrowed Qty</th><th>Returned Qty</th><th>Damaged Qty</th><th>Currently Borrowed</th><th>Penalty Records</th></tr>';
             <?php foreach($equipmentSummaryList as $item): ?>
-            html += '<tr><td><?= htmlspecialchars($item['rfid']) ?></td><td><?= htmlspecialchars($item['equipment_name']) ?></td><td><?= $item['borrowed_quantity'] ?></td><td><?= $item['returned_quantity'] ?></td><td><?= $item['damaged_returns'] ?></td><td><?= $item['currently_borrowed'] ?></td><td><?= $item['penalty_records'] ?></td></tr>';
+            html += '<tr>';
+            html += '<td><?= htmlspecialchars($item['rfid']) ?></td>';
+            html += '<td><?= htmlspecialchars($item['equipment_name']) ?></td>';
+            html += '<td><?= $item['borrowed_quantity'] ?></td>';
+            html += '<td><?= $item['returned_quantity'] ?></td>';
+            html += '<td><?= $item['damaged_returns'] ?></td>';
+            html += '<td><?= $item['currently_borrowed'] ?></td>';
+            html += '<td><?= $item['penalty_records'] ?></td>';
+            html += '</tr>';
             <?php endforeach; ?>
             html += '</table>';
             
@@ -857,12 +1202,13 @@ usort($equipmentSummaryList, function($a, $b) {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'Report_' + monthName + '_' + year + '.xls';
+            const filename = 'Report_' + period + '_' + periodDisplay.replace(/[^a-zA-Z0-9]/g, '_') + '.xls';
+            a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
             
             // Show success notification
-            showToast('Excel Export Successful', 'Report has been downloaded as ' + monthName + '_' + year + '.xls', 'success');
+            showToast('Excel Export Successful', 'Report has been downloaded as ' + filename, 'success');
         }
         
         // Extract reports by period
@@ -870,34 +1216,41 @@ usort($equipmentSummaryList, function($a, $b) {
             const currentMonth = <?= $month ?>;
             const currentYear = <?= $year ?>;
             const today = new Date();
+            const todayStr = today.toISOString().split('T')[0];
             
-            let targetUrl = 'reports.php?';
+            let targetUrl = 'reports.php?period=' + period;
             
             switch(period) {
                 case 'daily':
-                    // Today's report
-                    showToast('Daily Report', "Showing today's transactions. Use the month/year filter and then Print or Export.", 'info');
-                    setTimeout(() => window.print(), 500);
+                    targetUrl += '&date=' + todayStr;
+                    showToast('Daily Report', 'Loading daily report for today...', 'info');
+                    setTimeout(() => {
+                        window.location.href = targetUrl;
+                    }, 500);
                     break;
                     
                 case 'weekly':
-                    // Current week
-                    showToast('Weekly Report', "Showing this week's transactions. Use the month/year filter for the current period.", 'info');
-                    setTimeout(() => window.print(), 500);
+                    targetUrl += '&date=' + todayStr;
+                    showToast('Weekly Report', 'Loading weekly report for current week...', 'info');
+                    setTimeout(() => {
+                        window.location.href = targetUrl;
+                    }, 500);
                     break;
                     
                 case 'monthly':
-                    // Current month (already displayed)
-                    showToast('Monthly Report', 'Currently displayed. Use Print or Export buttons above to download.', 'info');
-                    setTimeout(() => window.print(), 500);
+                    targetUrl += '&month=' + currentMonth + '&year=' + currentYear;
+                    showToast('Monthly Report', 'Loading monthly report...', 'info');
+                    setTimeout(() => {
+                        window.location.href = targetUrl;
+                    }, 500);
                     break;
                     
                 case 'yearly':
-                    // Redirect to yearly view
-                    showToast('Yearly Report', 'Generating full year report. This may take a moment...', 'info');
+                    targetUrl += '&year=' + currentYear;
+                    showToast('Yearly Report', 'Loading yearly report...', 'info');
                     setTimeout(() => {
-                        window.location.href = 'reports_yearly.php?year=' + currentYear;
-                    }, 1000);
+                        window.location.href = targetUrl;
+                    }, 500);
                     break;
             }
         }

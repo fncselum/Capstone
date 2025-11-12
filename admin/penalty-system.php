@@ -390,6 +390,8 @@ class PenaltySystem
                     u.rfid_tag,
                     p.equipment_name,
                     p.penalty_type,
+                    p.guideline_id,
+                    pg.penalty_type AS guideline_type,
                     p.amount_owed,
                     p.amount_note,
                     p.damage_severity,
@@ -405,6 +407,7 @@ class PenaltySystem
                     da.detected_issues
                 FROM penalties p
                 LEFT JOIN users u ON u.id = p.user_id
+                LEFT JOIN penalty_guidelines pg ON pg.id = p.guideline_id
                 LEFT JOIN penalty_damage_assessments da ON da.penalty_id = p.id
                 $where
                 ORDER BY p.date_imposed DESC";
@@ -432,9 +435,11 @@ class PenaltySystem
                 'Under Review' => ['count' => 0, 'amount' => 0.00],
                 'Resolved' => ['count' => 0, 'amount' => 0.00],
                 'Cancelled' => ['count' => 0, 'amount' => 0.00],
+                'Appealed' => ['count' => 0, 'amount' => 0.00],
             ],
             'damage_cases' => 0,
-            'lost_cases' => 0
+            'lost_cases' => 0,
+            'late_return_cases' => 0
         ];
 
         $totals = $this->conn->query("SELECT COUNT(*) AS total, SUM(amount_owed) AS amount FROM penalties");
@@ -463,6 +468,11 @@ class PenaltySystem
         $lostCount = $this->conn->query("SELECT COUNT(*) AS total FROM penalties WHERE penalty_type = 'Loss'");
         if ($lostCount && ($row = $lostCount->fetch_assoc())) {
             $stats['lost_cases'] = (int)$row['total'];
+        }
+
+        $lateReturnCount = $this->conn->query("SELECT COUNT(*) AS total FROM penalties WHERE penalty_type = 'Late Return'");
+        if ($lateReturnCount && ($row = $lateReturnCount->fetch_assoc())) {
+            $stats['late_return_cases'] = (int)$row['total'];
         }
 
         return $stats;
