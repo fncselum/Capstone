@@ -217,9 +217,6 @@ class PenaltySystem
     {
         $status = $payload['status'] ?? 'Pending';
         $notes = trim($payload['notes'] ?? '');
-        $resolutionType = $payload['resolution_type'] ?? null;
-        $resolutionNotes = trim($payload['resolution_notes'] ?? '');
-
         $dateResolved = null;
         $resolvedBy = null;
 
@@ -231,10 +228,7 @@ class PenaltySystem
         $sql = "UPDATE penalties SET
                     status = ?,
                     date_resolved = ?,
-                    resolution_type = ?,
-                    resolution_notes = ?,
                     resolved_by = ?,
-                    notes = CASE WHEN ? <> '' THEN CONCAT_WS('\n', notes, ?) ELSE notes END,
                     updated_at = NOW()
                 WHERE id = ?";
 
@@ -244,20 +238,58 @@ class PenaltySystem
             return false;
         }
 
+        $existing = $this->conn->prepare("SELECT status, resolved_by FROM penalties WHERE id = ? LIMIT 1");
+        $oldStatus = null;
+        $previousResolver = null;
+        if ($existing) {
+            $existing->bind_param('i', $penaltyId);
+            if ($existing->execute()) {
+                $result = $existing->get_result();
+                if ($row = $result->fetch_assoc()) {
+                    $oldStatus = $row['status'] ?? null;
+                    $previousResolver = $row['resolved_by'] ?? null;
+                }
+            }
+            $existing->close();
+        }
+
         $stmt->bind_param(
-            'ssssissi',
+            'sssi',
             $status,
             $dateResolved,
-            $resolutionType,
-            $resolutionNotes,
             $resolvedBy,
-            $notes,
-            $notes,
             $penaltyId
         );
 
         $success = $stmt->execute();
         $stmt->close();
+
+        if ($success) {
+            $history = $this->conn->prepare(
+                "INSERT INTO penalty_status_history (
+                        penalty_id,
+                        old_status,
+                        new_status,
+                        notes,
+                        changed_by
+                    ) VALUES (?, ?, ?, ?, ?)"
+            );
+
+            if ($history) {
+                $changedBy = $_SESSION['admin_id'] ?? $previousResolver;
+                $history->bind_param(
+                    'isssi',
+                    $penaltyId,
+                    $oldStatus,
+                    $status,
+                    $notes !== '' ? $notes : null,
+                    $changedBy
+                );
+                $history->execute();
+                $history->close();
+            }
+        }
+
         return $success;
     }
 
@@ -433,6 +465,9 @@ class PenaltySystem
             'by_status' => [
                 'Pending' => ['count' => 0, 'amount' => 0.00],
                 'Under Review' => ['count' => 0, 'amount' => 0.00],
+                'Awaiting Student Action' => ['count' => 0, 'amount' => 0.00],
+                'Repair in Progress' => ['count' => 0, 'amount' => 0.00],
+                'Awaiting Inspection' => ['count' => 0, 'amount' => 0.00],
                 'Resolved' => ['count' => 0, 'amount' => 0.00],
                 'Cancelled' => ['count' => 0, 'amount' => 0.00],
                 'Appealed' => ['count' => 0, 'amount' => 0.00],

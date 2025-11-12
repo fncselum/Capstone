@@ -303,25 +303,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
     }
     
-    if ($action === 'quick_resolve' && isset($_POST['penalty_id'])) {
-        $penaltyId = (int)$_POST['penalty_id'];
-        $resolutionType = $_POST['resolution_type'] ?? 'Paid';
-        $statusPayload = [
-            'status' => 'Resolved',
-            'notes' => 'Quick resolved by admin',
-            'resolution_type' => $resolutionType,
-            'resolution_notes' => 'Resolved via quick action'
-        ];
-
-        if ($penaltySystem->updatePenaltyStatus($penaltyId, $statusPayload)) {
-            $_SESSION['success_message'] = "Penalty marked as resolved.";
-            header('Location: admin-penalty-management.php');
-            exit;
-        } else {
-            $error_message = "Failed to resolve penalty.";
-        }
-    }
-    
     if ($action === 'cancel_penalty' && isset($_POST['penalty_id'])) {
         $penaltyId = (int)$_POST['penalty_id'];
         $reason = $_POST['cancel_reason'] ?? 'Cancelled by admin';
@@ -455,6 +436,36 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     </div>
 
                     <div class="stat-card">
+                        <div class="stat-icon" style="background: #ff7043; color: white;">
+                            <i class="fas fa-user-clock"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 class="stat-number"><?= number_format($stats['by_status']['Awaiting Student Action']['count'] ?? 0) ?></h3>
+                            <p class="stat-label">Awaiting Student</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #20c997; color: white;">
+                            <i class="fas fa-screwdriver-wrench"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 class="stat-number"><?= number_format($stats['by_status']['Repair in Progress']['count'] ?? 0) ?></h3>
+                            <p class="stat-label">Repair in Progress</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: #6f42c1; color: white;">
+                            <i class="fas fa-clipboard-check"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 class="stat-number"><?= number_format($stats['by_status']['Awaiting Inspection']['count'] ?? 0) ?></h3>
+                            <p class="stat-label">Awaiting Inspection</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
                         <div class="stat-icon" style="background: #dc3545; color: white;">
                             <i class="fas fa-hammer"></i>
                         </div>
@@ -557,23 +568,31 @@ $stats = $penaltySystem->getPenaltyStatistics();
                         </div>
                         <?php endif; ?>
 
-                        <?php if (!empty($damage_penalty_data['suggested_guideline_id'])): ?>
-                        <div class="alert" style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border-left: 4px solid #2196f3; color: #1565c0; margin-top: 0;">
+                        <?php
+                            $suggestedGuidelineId = $damage_penalty_data['suggested_guideline_id'] ?? '';
+                            $suggestedGuidelineReason = $damage_penalty_data['suggested_guideline_reason'] ?? 'Auto-suggested based on damage severity';
+                            $suggestedGuidelineName = 'N/A';
+                            if (!empty($suggestedGuidelineId)) {
+                                foreach ($activeGuidelines as $guideline) {
+                                    if (isset($guideline['id']) && (int)$guideline['id'] === (int)$suggestedGuidelineId) {
+                                        $suggestedGuidelineName = $guideline['guideline_name'] ?? $guideline['title'] ?? 'Unnamed Guideline';
+                                        break;
+                                    }
+                                }
+                            }
+                        ?>
+                        <input type="hidden" id="suggested_guideline_id" value="<?= htmlspecialchars((string)$suggestedGuidelineId) ?>">
+                        <?php if (!empty($suggestedGuidelineId)): ?>
+                        <div id="guidelineSuggestionContainer" class="alert suggested-guideline" style="margin-top: 0;">
                             <i class="fas fa-lightbulb"></i>
                             <div>
-                                <strong>Suggested Guideline:</strong> 
-                                <?php 
-                                    $suggestedGuidelineName = 'N/A';
-                                    foreach ($activeGuidelines as $guideline) {
-                                        if (isset($guideline['id']) && $guideline['id'] == $damage_penalty_data['suggested_guideline_id']) {
-                                            $suggestedGuidelineName = isset($guideline['guideline_name']) ? $guideline['guideline_name'] : 'Unnamed Guideline';
-                                            break;
-                                        }
-                                    }
-                                    echo htmlspecialchars($suggestedGuidelineName);
-                                ?>
+                                <strong>Suggested Guideline:</strong>
+                                <span id="guidelineSuggestionName"><?= htmlspecialchars($suggestedGuidelineName) ?></span>
                                 <br>
-                                <small><?= htmlspecialchars($damage_penalty_data['suggested_guideline_reason'] ?? 'Auto-suggested based on damage severity') ?></small>
+                                <small id="guidelineSuggestionReason"><?= htmlspecialchars($suggestedGuidelineReason) ?></small>
+                                <div id="guidelineOverrideNote" class="override-note" style="display: none;">
+                                    Manual override active — confirm the selected guideline fits this damage case.
+                                </div>
                             </div>
                         </div>
                         <?php endif; ?>
@@ -605,7 +624,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
                         </div>
 
                         <div class="form-group">
-                            <label for="penalty_guideline">Select Penalty Guideline to Issue: <span class="required">*</span></label>
+                            <label for="penalty_guideline">Select Penalty Guideline to Issue: <span class="required">*</span> <span id="guidelineSelectionBadge" class="suggestion-badge" style="display: none;"></span></label>
                             <select name="guideline_id" id="penalty_guideline" required>
                                 <option value="">-- Select a Penalty Guideline --</option>
                                 <?php foreach ($activeGuidelines as $guideline): ?>
@@ -651,8 +670,12 @@ $stats = $penaltySystem->getPenaltyStatistics();
                             <option value="all" <?= $status_filter === 'all' ? 'selected' : '' ?>>All Statuses</option>
                             <option value="Pending" <?= $status_filter === 'Pending' ? 'selected' : '' ?>>Pending</option>
                             <option value="Under Review" <?= $status_filter === 'Under Review' ? 'selected' : '' ?>>Under Review</option>
+                            <option value="Awaiting Student Action" <?= $status_filter === 'Awaiting Student Action' ? 'selected' : '' ?>>Awaiting Student Action</option>
+                            <option value="Repair in Progress" <?= $status_filter === 'Repair in Progress' ? 'selected' : '' ?>>Repair in Progress</option>
+                            <option value="Awaiting Inspection" <?= $status_filter === 'Awaiting Inspection' ? 'selected' : '' ?>>Awaiting Inspection</option>
                             <option value="Resolved" <?= $status_filter === 'Resolved' ? 'selected' : '' ?>>Resolved</option>
                             <option value="Cancelled" <?= $status_filter === 'Cancelled' ? 'selected' : '' ?>>Cancelled</option>
+                            <option value="Appealed" <?= $status_filter === 'Appealed' ? 'selected' : '' ?>>Appealed</option>
                         </select>
                     </div>
 
@@ -738,13 +761,9 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                                     <i class="fas fa-eye"></i>
                                                 </button>
                                                 
-                                                <?php if ($penalty['status'] === 'Pending' || $penalty['status'] === 'Under Review'): ?>
+                                                <?php if (in_array($penalty['status'], ['Pending', 'Under Review', 'Awaiting Student Action', 'Repair in Progress', 'Awaiting Inspection'], true)): ?>
                                                     <button class="btn btn-small btn-primary" onclick="updatePenaltyStatusModal(<?= $penalty['id'] ?>)" title="Update Status">
                                                         <i class="fas fa-edit"></i> Update
-                                                    </button>
-                                                    
-                                                    <button class="btn btn-small btn-success" onclick="quickResolveModal(<?= $penalty['id'] ?>, '<?= htmlspecialchars($penalty['penalty_type']) ?>')" title="Mark Resolved">
-                                                        <i class="fas fa-check-circle"></i> Resolve
                                                     </button>
                                                     
                                                     <button class="btn btn-small btn-danger" onclick="dismissPenaltyModal(<?= $penalty['id'] ?>)" title="Dismiss Penalty">
@@ -802,6 +821,9 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     <select name="status" id="status_select" required onchange="toggleResolutionFields()">
                         <option value="Pending">Pending</option>
                         <option value="Under Review">Under Review</option>
+                        <option value="Awaiting Student Action">Awaiting Student Action</option>
+                        <option value="Repair in Progress">Repair in Progress</option>
+                        <option value="Awaiting Inspection">Awaiting Inspection</option>
                         <option value="Resolved">Resolved</option>
                         <option value="Cancelled">Cancelled</option>
                         <option value="Appealed">Appealed</option>
@@ -833,38 +855,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">Update Status</button>
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Quick Resolve Modal -->
-    <div id="quickResolveModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeQuickResolveModal()">&times;</span>
-            <h2><i class="fas fa-check-circle"></i> Quick Resolve Penalty</h2>
-            <form method="POST">
-                <input type="hidden" name="action" value="quick_resolve">
-                <input type="hidden" name="penalty_id" id="quick_resolve_penalty_id">
-                
-                <div class="form-group">
-                    <label for="quick_resolution_type">Resolution Type</label>
-                    <select name="resolution_type" id="quick_resolution_type" required>
-                        <option value="Completed">Completed</option>
-                        <option value="Repaired">Repaired</option>
-                        <option value="Replaced">Replaced</option>
-                        <option value="Waived">Waived</option>
-                        <option value="Dismissed">Dismissed</option>
-                        <option value="Other">Other</option>
-                    </select>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-success">
-                        <i class="fas fa-check"></i> Mark as Resolved
-                    </button>
-                    <button type="button" class="btn btn-secondary" onclick="closeQuickResolveModal()">Cancel</button>
-                </div>
             </form>
         </div>
     </div>
@@ -1232,6 +1222,21 @@ $stats = $penaltySystem->getPenaltyStatistics();
             color: white;
         }
 
+        .badge.status.awaiting-student-action {
+            background: #ff7043;
+            color: white;
+        }
+
+        .badge.status.repair-in-progress {
+            background: #20c997;
+            color: white;
+        }
+
+        .badge.status.awaiting-inspection {
+            background: #6f42c1;
+            color: white;
+        }
+
         .badge.status.appealed {
             background: #6c5ce7;
             color: white;
@@ -1277,24 +1282,39 @@ $stats = $penaltySystem->getPenaltyStatistics();
             color: #6c757d;
             font-style: italic;
         }
-        
+
+        .suggested-guideline {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-left: 4px solid #2196f3;
+            color: #0d47a1;
+        }
+
+        .suggested-guideline .override-note {
+            margin-top: 8px;
+            font-size: 0.85rem;
+            color: #c62828;
+            font-weight: 600;
+        }
+
+        .suggestion-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .suggestion-badge.manual {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
         .guideline-text {
-            display: block;
-            font-size: 0.9rem;
-            color: #495057;
-            line-height: 1.4;
-        }
-        
-        .guideline-text:hover {
-            color: #006633;
-            cursor: help;
-        }
-        
-        .alert {
-            padding: 12px 16px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            display: flex;
             align-items: center;
             gap: 10px;
         }
@@ -2228,6 +2248,13 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 return;
             }
 
+            const escapeHtml = (unsafe = '') => String(unsafe)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+
             const severityBadge = {
                 minor: '<span class="penalty-badge" style="background:#e8f5e9;color:#2e7d32"><i class="fas fa-circle-info"></i> Minor</span>',
                 moderate: '<span class="penalty-badge" style="background:#fff3e0;color:#e65100"><i class="fas fa-triangle-exclamation"></i> Moderate</span>',
@@ -2273,6 +2300,38 @@ $stats = $penaltySystem->getPenaltyStatistics();
                    </div>`
                 : '';
 
+            const history = Array.isArray(data.status_history) ? data.status_history : [];
+            const statusSequence = ['Pending', 'Under Review', 'Awaiting Student Action', 'Repair in Progress', 'Awaiting Inspection', 'Resolved'];
+            let currentStatusIndex = statusSequence.indexOf(data.status || '');
+            if (currentStatusIndex === -1) {
+                currentStatusIndex = history.length ? statusSequence.indexOf(history[history.length - 1].new_status) : 0;
+            }
+
+            const historyMarkup = history.map(entry => {
+                const statusIdx = statusSequence.indexOf(entry.new_status);
+                let stateClass = 'future';
+                if (statusIdx !== -1) {
+                    if (statusIdx < currentStatusIndex) stateClass = 'done';
+                    else if (statusIdx === currentStatusIndex) stateClass = 'current';
+                }
+
+                const formattedDate = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+                const adminName = entry.admin_username ? entry.admin_username : (entry.changed_by ? `Admin #${entry.changed_by}` : 'System');
+                const notes = entry.notes ? `<div class="timeline-notes">${entry.notes.replace(/\n/g, '<br>')}</div>` : '';
+                return `
+                    <li class="timeline-step ${stateClass}">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <span class="timeline-status">${entry.new_status}</span>
+                                <span class="timeline-meta">${formattedDate}</span>
+                            </div>
+                            <div class="timeline-submeta">Updated by ${adminName}</div>
+                            ${notes}
+                        </div>
+                    </li>`;
+            }).join('');
+
             content.innerHTML = `
                     <div class="penalty-detail-header">
                         <h2><i class="fas fa-file-invoice"></i> Damage Penalty Details #${data.id}</h2>
@@ -2311,11 +2370,16 @@ $stats = $penaltySystem->getPenaltyStatistics();
                             ${detectedIssuesHtml}
                             ${damageNotesHtml}
                             ${finalDecisionHtml}
+                            <div class="detail-section full-width-section">
+                                <h3><i class="fas fa-route"></i> Status Timeline</h3>
+                                <ul class="penalty-timeline">
+                                    ${historyMarkup || '<li class="timeline-step current"><div class="timeline-dot"></div><div class="timeline-content"><div class="timeline-header"><span class="timeline-status">'+ (data.status || 'Pending') +'</span></div><div class="timeline-submeta">No status history recorded yet.</div></div></li>'}
+                                </ul>
+                            </div>
                         </div>
                         <div class="action-buttons">
                             <button class="btn btn-secondary" onclick="closePenaltyDetailModal()"><i class="fas fa-times"></i> Close</button>
                             <button class="btn btn-primary" onclick="updatePenaltyStatusModal(${data.id})"><i class="fas fa-edit"></i> Update Status</button>
-                            <button class="btn btn-success" onclick="resolvePenalty(${data.id})"><i class="fas fa-check"></i> Mark as Resolved</button>
                         </div>
                 </div>`;
 
@@ -2331,27 +2395,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
             closePenaltyDetailModal();
             document.getElementById('status_penalty_id').value = penaltyId;
             document.getElementById('statusModal').style.display = 'block';
-        }
-
-        // Quick Resolve Modal
-        function quickResolveModal(penaltyId, penaltyType) {
-            document.getElementById('quick_resolve_penalty_id').value = penaltyId;
-            
-            // Pre-select resolution type based on penalty type
-            const resolutionSelect = document.getElementById('quick_resolution_type');
-            if (penaltyType.toLowerCase().includes('damage')) {
-                resolutionSelect.value = 'Repaired';
-            } else if (penaltyType.toLowerCase().includes('loss')) {
-                resolutionSelect.value = 'Replaced';
-            } else {
-                resolutionSelect.value = 'Completed';
-            }
-            
-            document.getElementById('quickResolveModal').style.display = 'block';
-        }
-
-        function closeQuickResolveModal() {
-            document.getElementById('quickResolveModal').style.display = 'none';
         }
 
         // Dismiss Penalty Modal
@@ -2372,23 +2415,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         function closeProcessAppealModal() {
             document.getElementById('processAppealModal').style.display = 'none';
-        }
-
-        function resolvePenalty(penaltyId) {
-            if (!confirm('Mark this penalty as resolved?')) {
-                return;
-            }
-
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.innerHTML = `
-                <input type="hidden" name="action" value="update_status">
-                <input type="hidden" name="penalty_id" value="${penaltyId}">
-                <input type="hidden" name="status" value="Resolved">
-                <input type="hidden" name="notes" value="Penalty resolved by admin">
-            `;
-            document.body.appendChild(form);
-            form.submit();
         }
 
         window.addEventListener('click', (event) => {
@@ -2465,6 +2491,49 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 });
         }
 
+        function refreshGuidelineSuggestionIndicators() {
+            const select = document.getElementById('penalty_guideline');
+            const suggestionIdField = document.getElementById('suggested_guideline_id');
+            const suggestionBadge = document.getElementById('guidelineSelectionBadge');
+            const overrideNote = document.getElementById('guidelineOverrideNote');
+
+            if (!select || !suggestionBadge) {
+                return;
+            }
+
+            const suggestedId = suggestionIdField ? suggestionIdField.value : '';
+            const currentValue = select.value;
+
+            if (!suggestedId) {
+                suggestionBadge.style.display = 'none';
+                if (overrideNote) {
+                    overrideNote.style.display = 'none';
+                }
+                return;
+            }
+
+            if (currentValue === suggestedId) {
+                suggestionBadge.textContent = 'Suggested';
+                suggestionBadge.classList.remove('manual');
+                suggestionBadge.style.display = 'inline-flex';
+                if (overrideNote) {
+                    overrideNote.style.display = 'none';
+                }
+            } else if (currentValue) {
+                suggestionBadge.textContent = 'Manual override';
+                suggestionBadge.classList.add('manual');
+                suggestionBadge.style.display = 'inline-flex';
+                if (overrideNote) {
+                    overrideNote.style.display = 'block';
+                }
+            } else {
+                suggestionBadge.style.display = 'none';
+                if (overrideNote) {
+                    overrideNote.style.display = 'none';
+                }
+            }
+        }
+
         function updatePenaltyFromGuideline() {
             const select = document.getElementById('manual_guideline_id');
             const selectedOption = select.options[select.selectedIndex];
@@ -2493,6 +2562,14 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
             document.getElementById('preview_amount').textContent = amount.toFixed(2);
         }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const guidelineSelect = document.getElementById('penalty_guideline');
+            if (guidelineSelect) {
+                guidelineSelect.addEventListener('change', refreshGuidelineSuggestionIndicators);
+                refreshGuidelineSuggestionIndicators();
+            }
+        });
 
         function calculateLatePenalty() {
             const days = parseInt(document.getElementById('days_overdue').value) || 0;

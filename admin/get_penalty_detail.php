@@ -42,7 +42,11 @@ $query = "SELECT
             p.damage_severity,
             p.damage_notes,
             p.description,
-            p.notes,
+            p.penalty_amount,
+            p.amount_owed,
+            p.amount_note,
+            p.days_overdue,
+            p.daily_rate,
             p.status,
             p.created_at,
             p.date_imposed,
@@ -53,20 +57,25 @@ $query = "SELECT
             da.admin_assessment,
             u.student_id,
             u.rfid_tag as user_rfid,
+            t.equipment_id AS txn_equipment_id,
             t.transaction_date,
             t.expected_return_date as due_date,
             t.actual_return_date,
             t.transaction_type,
             t.status as txn_status,
             t.condition_after as return_condition,
-            e.rfid_tag as equipment_rfid,
+            COALESCE(e.rfid_tag, p.equipment_id) as equipment_rfid,
             e.name as equipment_full_name,
             c.name as category
           FROM penalties p
           LEFT JOIN penalty_damage_assessments da ON da.penalty_id = p.id
           LEFT JOIN users u ON p.user_id = u.id
           LEFT JOIN transactions t ON p.transaction_id = t.id
-          LEFT JOIN equipment e ON p.equipment_id = e.id
+          LEFT JOIN equipment e ON (
+                (p.equipment_id IS NOT NULL AND p.equipment_id <> '' AND e.id = p.equipment_id)
+             OR (t.equipment_id IS NOT NULL AND e.id = t.equipment_id)
+             OR (p.equipment_id IS NOT NULL AND p.equipment_id <> '' AND e.rfid_tag = p.equipment_id)
+          )
           LEFT JOIN categories c ON e.category_id = c.id
           WHERE p.id = ?";
 
@@ -88,6 +97,24 @@ if ($result->num_rows === 0) {
 }
 
 $penalty = $result->fetch_assoc();
+
+$historySql = "SELECT h.old_status, h.new_status, h.notes, h.changed_by, h.created_at, a.username AS admin_username
+               FROM penalty_status_history h
+               LEFT JOIN admin_users a ON a.id = h.changed_by
+               WHERE h.penalty_id = ?
+               ORDER BY h.created_at ASC";
+$histStmt = $conn->prepare($historySql);
+$penalty['status_history'] = [];
+if ($histStmt) {
+    $histStmt->bind_param('i', $penalty_id);
+    if ($histStmt->execute()) {
+        $histResult = $histStmt->get_result();
+        while ($row = $histResult->fetch_assoc()) {
+            $penalty['status_history'][] = $row;
+        }
+    }
+    $histStmt->close();
+}
 
 // Format dates
 if ($penalty['transaction_date']) {
