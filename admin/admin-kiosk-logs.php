@@ -324,22 +324,32 @@ $stats['return_logs'] = $result ? $result->fetch_assoc()['count'] : 0;
             background: #7b1fa2;
         }
 
+        .clear-wrap {
+            margin-left: auto;
+            display: flex;
+            align-items: flex-end;
+        }
+
         .clear-btn {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 10px 16px;
-            background: #f44336;
-            color: white;
+            padding: 8px 14px;
+            background: transparent;
+            color: #f44336;
+            border: 1px solid #f44336;
             text-decoration: none;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            font-weight: 500;
-            transition: background 0.3s ease;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            line-height: 1;
         }
 
         .clear-btn:hover {
-            background: #d32f2f;
+            background: #f44336;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(244, 67, 54, 0.25);
         }
 
         .export-btn {
@@ -700,12 +710,12 @@ $stats['return_logs'] = $result ? $result->fetch_assoc()['count'] : 0;
             <section class="content-section">
                 <div class="section-header">
                     <h2><i class="fas fa-filter"></i> Filters & Search</h2>
-                    <button class="export-btn" onclick="window.print()">
-                        <i class="fas fa-file-export"></i> Export
-                    </button>
+                    <a class="export-btn" id="downloadLogsBtn" href="export_kiosk_logs.php?type=<?= $filter_type ?>&status=<?= $filter_status ?>&date=<?= $filter_date ?>&search=<?= urlencode($search_query) ?>" title="Download Kiosk Logs">
+                        <i class="fas fa-download"></i>
+                    </a>
                 </div>
 
-                <form method="GET" action="" class="filter-form">
+                <form id="filtersForm" method="GET" class="filter-form">
                     <div class="filter-row">
                         <div class="filter-group">
                             <label for="type">Transaction Type</label>
@@ -734,21 +744,15 @@ $stats['return_logs'] = $result ? $result->fetch_assoc()['count'] : 0;
                         <div class="filter-group search-group">
                             <label for="search">Search</label>
                             <div class="search-input-wrapper">
-                                <input type="text" name="search" id="search" placeholder="Student ID, Equipment..." value="<?= htmlspecialchars($search_query) ?>">
-                                <button type="submit" class="search-btn">
-                                    <i class="fas fa-search"></i>
-                                </button>
+                                <input type="text" name="search" id="search" placeholder="Student ID, Equipment..." value="<?= htmlspecialchars($search_query) ?>" autocomplete="off">
+                                <?php if ($filter_type !== 'all' || $filter_status !== 'all' || !empty($filter_date) || !empty($search_query)): ?>
+                                    <a href="admin-kiosk-logs.php" class="clear-btn" title="Reset all filters">
+                                        <i class="fas fa-times"></i>
+                                        <span>Clear</span>
+                                    </a>
+                                <?php endif; ?>
                             </div>
                         </div>
-
-                        <?php if ($filter_type !== 'all' || $filter_status !== 'all' || !empty($filter_date) || !empty($search_query)): ?>
-                            <div class="filter-group">
-                                <label>&nbsp;</label>
-                                <a href="admin-kiosk-logs.php" class="clear-btn">
-                                    <i class="fas fa-times"></i> Clear Filters
-                                </a>
-                            </div>
-                        <?php endif; ?>
                     </div>
                 </form>
             </section>
@@ -891,6 +895,30 @@ $stats['return_logs'] = $result ? $result->fetch_assoc()['count'] : 0;
             // Redirect to transaction details or open modal
             window.location.href = 'admin-all-transaction.php?id=' + logId;
         }
+
+        // Debounced auto-submit for search
+        (function() {
+            const form = document.getElementById('filtersForm');
+            const searchInput = document.getElementById('search');
+            if (!form || !searchInput) return;
+
+            let timer = null;
+            const debounceMs = 500;
+            const submitWithDebounce = () => {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                }, debounceMs);
+            };
+
+            searchInput.addEventListener('input', submitWithDebounce);
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    form.requestSubmit ? form.requestSubmit() : form.submit();
+                }
+            });
+        })();
     </script>
 </body>
 </html>

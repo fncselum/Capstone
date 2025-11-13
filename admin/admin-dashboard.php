@@ -84,9 +84,18 @@ if ($db_connected) {
     $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active' AND expected_return_date < CURDATE()");
     if ($result) $stats['overdue_items'] = $result->fetch_assoc()['count'];
     
-    // Available Equipment (quantity > 0)
-    $result = $conn->query("SELECT COUNT(*) as count FROM equipment WHERE quantity > 0");
-    if ($result) $stats['available_equipment'] = $result->fetch_assoc()['count'];
+    // Available Equipment (sum of remaining units across items)
+    $result = $conn->query("SELECT 
+        SUM(GREATEST(COALESCE(i.quantity, e.quantity, 0)
+                   - COALESCE(i.borrowed_quantity, 0)
+                   - COALESCE(i.damaged_quantity, 0)
+                   - COALESCE(i.maintenance_quantity, 0), 0)) AS total_available_units
+      FROM equipment e
+      LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id");
+    if ($result) {
+        $rowAvail = $result->fetch_assoc();
+        $stats['available_equipment'] = (int)($rowAvail['total_available_units'] ?? 0);
+    }
     
     // Recent Transactions (last 10)
     $result = $conn->query("
@@ -186,7 +195,7 @@ if ($db_connected) {
                                 <i class="fas fa-boxes"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number">
+                                <h3 class="stat-number" id="dash_total_equipment">
                                     <?php 
                                     $equipment_count = 0;
                                     $equipment_query = $conn->query("SELECT COUNT(*) as count FROM equipment");
@@ -205,12 +214,12 @@ if ($db_connected) {
                                 <i class="fas fa-hand-holding"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number">
+                                <h3 class="stat-number" id="dash_currently_borrowed">
                                     <?php 
                                     $borrowed_count = 0;
                                     $check_transactions = $conn->query("SHOW TABLES LIKE 'transactions'");
                                     if ($check_transactions && $check_transactions->num_rows > 0) {
-                                        $borrowed_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_type = 'Borrow'");
+                                        $borrowed_query = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status='Active' AND transaction_type = 'Borrow'");
                                         if ($borrowed_query) {
                                             $borrowed_count = $borrowed_query->fetch_assoc()['count'];
                                         }
@@ -227,7 +236,7 @@ if ($db_connected) {
                                 <i class="fas fa-undo"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number">
+                                <h3 class="stat-number" id="dash_total_returns">
                                     <?php 
                                     $returned_count = 0;
                                     if ($check_transactions && $check_transactions->num_rows > 0) {
@@ -248,7 +257,7 @@ if ($db_connected) {
                                 <i class="fas fa-exclamation-triangle"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number">
+                                <h3 class="stat-number" id="dash_active_violations">
                                     <?php 
                                     $violations_count = 0;
                                     if ($check_transactions && $check_transactions->num_rows > 0) {
@@ -280,7 +289,7 @@ if ($db_connected) {
                                 <i class="fas fa-users"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number"><?= number_format($stats['total_users']) ?></h3>
+                                <h3 class="stat-number" id="dash_total_users"><?= number_format($stats['total_users']) ?></h3>
                                 <p class="stat-label">Total Users</p>
                             </div>
                         </div>
@@ -290,7 +299,7 @@ if ($db_connected) {
                                 <i class="fas fa-gavel"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number"><?= number_format($stats['total_penalties']) ?></h3>
+                                <h3 class="stat-number" id="dash_pending_penalties"><?= number_format($stats['total_penalties']) ?></h3>
                                 <p class="stat-label">Pending Penalties</p>
                             </div>
                         </div>
@@ -300,7 +309,7 @@ if ($db_connected) {
                                 <i class="fas fa-clock"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number"><?= number_format($stats['overdue_items']) ?></h3>
+                                <h3 class="stat-number" id="dash_overdue_items"><?= number_format($stats['overdue_items']) ?></h3>
                                 <p class="stat-label">Overdue Items</p>
                             </div>
                         </div>
@@ -310,7 +319,7 @@ if ($db_connected) {
                                 <i class="fas fa-check-circle"></i>
                             </div>
                             <div class="stat-content">
-                                <h3 class="stat-number"><?= number_format($stats['available_equipment']) ?></h3>
+                                <h3 class="stat-number" id="dash_available_equipment"><?= number_format($stats['available_equipment']) ?></h3>
                                 <p class="stat-label">Available Equipment</p>
                             </div>
                         </div>
@@ -596,6 +605,36 @@ if ($db_connected) {
         }
         
         // Navigation functionality handled by sidebar component
+    </script>
+    <script>
+        (function(){
+            const ids = {
+                total_equipment: 'dash_total_equipment',
+                currently_borrowed: 'dash_currently_borrowed',
+                total_returns: 'dash_total_returns',
+                active_violations: 'dash_active_violations',
+                total_users: 'dash_total_users',
+                pending_penalties: 'dash_pending_penalties',
+                overdue_items: 'dash_overdue_items',
+                available_equipment: 'dash_available_equipment'
+            };
+            const fmt = new Intl.NumberFormat();
+            async function refreshStats(){
+                try {
+                    const res = await fetch('dashboard_stats_api.php', { cache: 'no-store' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (!data || !data.ok) return;
+                    const s = data.stats || {};
+                    Object.entries(ids).forEach(([key,id])=>{
+                        const el = document.getElementById(id);
+                        if (el && key in s) el.textContent = fmt.format(s[key] ?? 0);
+                    });
+                } catch(e) { /* silent */ }
+            }
+            refreshStats();
+            setInterval(refreshStats, 15000);
+        })();
     </script>
 </body>
 </html>

@@ -151,11 +151,39 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
         <!-- Notifications -->
         <li class="nav-item <?= $current_page === 'admin-notifications.php' ? 'active' : '' ?>">
-            <a href="admin-notifications.php">
-                <i class="fas fa-bell" style="color: #ff5722;"></i>
-                <span>Notifications</span>
+            <a href="admin-notifications.php" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                <span style="display:flex; align-items:center; gap:10px;">
+                    <i class="fas fa-bell" style="color: #ff5722;"></i>
+                    <span>Notifications</span>
+                </span>
+                <span id="notifBadge" style="display:none; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:#e53935; color:#fff; font-size:12px; font-weight:700; line-height:20px; text-align:center;">0</span>
             </a>
         </li>
+
+        <script>
+        (function(){
+            const badge = document.getElementById('notifBadge');
+            if (!badge) return;
+            async function refreshNotif(){
+                try {
+                    const res = await fetch('notifications_api.php', { cache: 'no-store' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const unread = (data && data.ok) ? (data.unread||0) : 0;
+                    if (unread > 0) {
+                        badge.textContent = unread > 99 ? '99+' : unread;
+                        badge.style.display = 'inline-block';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                } catch (e) {
+                    // ignore errors to avoid breaking sidebar
+                }
+            }
+            refreshNotif();
+            setInterval(refreshNotif, 15000);
+        })();
+        </script>
 
         <!-- System Settings -->
         <li class="nav-item <?= $current_page === 'admin-settings.php' ? 'active' : '' ?>">

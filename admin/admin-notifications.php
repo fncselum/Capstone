@@ -42,6 +42,7 @@ $notifications = null;
 $total_records = 0;
 $total_pages = 1;
 $stats = ['total' => 0, 'unread' => 0, 'read' => 0, 'archived' => 0];
+$current_last_id = null;
 
 if ($table_exists) {
     // Get statistics
@@ -62,6 +63,13 @@ if ($table_exists) {
         ];
     }
 
+    // Get latest notification id for change detection
+    $last_res = $conn->query("SELECT MAX(id) AS last_id FROM notifications");
+    if ($last_res) {
+        $last_row = $last_res->fetch_assoc();
+        $current_last_id = isset($last_row['last_id']) ? (int)$last_row['last_id'] : null;
+    }
+
     // Build SQL query with filters
     $sql = "SELECT * FROM notifications WHERE 1=1";
     $count_sql = "SELECT COUNT(*) as total FROM notifications WHERE 1=1";
@@ -76,6 +84,10 @@ if ($table_exists) {
         $status_escaped = $conn->real_escape_string($filter_status);
         $sql .= " AND status = '$status_escaped'";
         $count_sql .= " AND status = '$status_escaped'";
+    } else {
+        // Default view excludes archived
+        $sql .= " AND status <> 'archived'";
+        $count_sql .= " AND status <> 'archived'";
     }
 
     if (!empty($search_query)) {
@@ -519,9 +531,101 @@ if ($table_exists) {
             border-radius: 8px;
             resize: vertical;
         }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .modal-header .close {
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .modal-footer button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .modal-footer button.confirm {
+            background: #006633;
+            color: white;
+        }
+
+        .modal-footer button.cancel {
+            background: #f5f5f5;
+            color: #666;
+        }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1;
+        }
+
+        .toast {
+            background: #e8f5e9;
+            color: #1b5e20;
+            padding: 10px 20px;
+            border-radius: 6px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            margin-bottom: 10px;
+        }
+
+        .toast.error {
+            background: #ffebee;
+            color: #b71c1c;
+        }
     </style>
 </head>
 <body>
+
     <div class="admin-container">
         <?php include 'includes/sidebar.php'; ?>
 
@@ -641,7 +745,7 @@ if ($table_exists) {
                     <?php if ($notifications && $notifications->num_rows > 0): ?>
                         <div class="notifications-list">
                             <?php while ($notif = $notifications->fetch_assoc()): ?>
-                                <div class="notification-item <?= $notif['status'] === 'unread' ? 'unread' : '' ?>">
+                                <div id="notif-<?= $notif['id'] ?>" class="notification-item <?= $notif['status'] === 'unread' ? 'unread' : '' ?>">
                                     <div class="notification-header">
                                         <div class="notification-title">
                                             <?php
@@ -724,69 +828,169 @@ if ($table_exists) {
         </main>
     </div>
 
+    <style>
+        .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:1000}
+        .confirm-modal{background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:min(480px,92vw);overflow:hidden}
+        .confirm-modal .hd{padding:16px 20px;border-bottom:1px solid #f0f0f0;font-weight:800;color:#333;display:flex;align-items:center;gap:10px}
+        .confirm-modal .bd{padding:18px 20px;color:#555;line-height:1.5}
+        .confirm-modal .ft{display:flex;gap:10px;justify-content:flex-end;padding:14px 16px;background:#fafafa;border-top:1px solid #f0f0f0}
+        .btn{padding:10px 16px;border-radius:8px;border:1px solid transparent;font-weight:700;font-size:.9rem;cursor:pointer}
+        .btn.cancel{background:#fff;border-color:#ddd;color:#555}
+        .btn.primary{background:#0b875b;color:#fff}
+        .btn.danger{background:#e53935;color:#fff}
+        .toast-wrap{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:10px;z-index:1100}
+        .toast{background:#333;color:#fff;padding:12px 14px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.25);min-width:220px;font-size:.9rem}
+        .toast.success{background:#2e7d32}
+        .toast.error{background:#c62828}
+    </style>
+    <div id="modalBackdrop" class="modal-backdrop" aria-hidden="true">
+        <div class="confirm-modal" role="dialog" aria-modal="true">
+            <div class="hd" id="confirmTitle"><i class="fas fa-bell"></i><span>Confirm</span></div>
+            <div class="bd" id="confirmMessage">Are you sure?</div>
+            <div class="ft">
+                <button type="button" class="btn cancel" id="confirmCancel">Cancel</button>
+                <button type="button" class="btn primary" id="confirmOk">Confirm</button>
+            </div>
+        </div>
+    </div>
+    <div class="toast-wrap" id="toastWrap"></div>
+
     <script>
-        function logout() {
-            localStorage.clear();
-            sessionStorage.clear();
-            window.location.href = 'logout.php';
+        const currentFilterStatus = <?= json_encode($filter_status) ?>;
+        function logout(){localStorage.clear();sessionStorage.clear();window.location.href='logout.php'}
+
+        function showToast(msg,type='success',ms=2200){
+            const wrap=document.getElementById('toastWrap');
+            const t=document.createElement('div');
+            t.className=`toast ${type}`; t.textContent=msg; wrap.appendChild(t);
+            setTimeout(()=>{t.style.opacity='0';t.style.transform='translateY(6px)';},ms-400);
+            setTimeout(()=>wrap.removeChild(t),ms);
         }
 
-        function markAsRead(id) {
-            if (confirm('Mark this notification as read?')) {
-                fetch('update_notification.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `id=${id}&action=read`
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        location.reload();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-            }
+        function showUndoToast(message, onUndo, ms=6000){
+            const wrap=document.getElementById('toastWrap');
+            const t=document.createElement('div');
+            t.className='toast success';
+            t.style.display='flex';
+            t.style.alignItems='center';
+            t.style.justifyContent='space-between';
+            t.style.gap='12px';
+            const span=document.createElement('span');
+            span.textContent=message;
+            const btn=document.createElement('button');
+            btn.textContent='Undo';
+            btn.className='btn cancel';
+            btn.style.padding='6px 10px';
+            btn.style.borderRadius='6px';
+            btn.style.border='1px solid rgba(255,255,255,.6)';
+            btn.style.background='transparent';
+            btn.style.color='#fff';
+            btn.onclick=()=>{ try{ onUndo && onUndo(); }finally{ if (t.parentNode) t.parentNode.removeChild(t); } };
+            t.appendChild(span); t.appendChild(btn); wrap.appendChild(t);
+            setTimeout(()=>{ if (t.parentNode) { t.style.opacity='0'; t.style.transform='translateY(6px)'; setTimeout(()=>t.parentNode && t.parentNode.removeChild(t), 400);} }, ms);
         }
 
-        function archiveNotification(id) {
-            if (confirm('Archive this notification?')) {
-                fetch('update_notification.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `id=${id}&action=archive`
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        location.reload();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-            }
+        function confirmModal(opts){
+            return new Promise(resolve=>{
+                const bd=document.getElementById('modalBackdrop');
+                const t=document.getElementById('confirmTitle').querySelector('span');
+                const m=document.getElementById('confirmMessage');
+                const ok=document.getElementById('confirmOk');
+                const cancel=document.getElementById('confirmCancel');
+                t.textContent=opts.title||'Confirm';
+                m.textContent=opts.message||'Are you sure?';
+                ok.textContent=opts.confirmText||'Confirm';
+                ok.className=`btn ${opts.variant==='danger'?'danger':'primary'}`;
+                const close=(val)=>{bd.style.display='none';ok.onclick=null;cancel.onclick=null;bd.onclick=null;resolve(val)};
+                ok.onclick=()=>close(true);
+                cancel.onclick=()=>close(false);
+                bd.onclick=(e)=>{if(e.target===bd) close(false)};
+                bd.style.display='flex';
+            });
         }
 
-        function deleteNotification(id, title) {
-            if (confirm(`Are you sure you want to delete "${title}"?\n\nThis action cannot be undone.`)) {
-                fetch('delete_notification.php', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: `id=${id}`
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        location.reload();
-                    } else {
-                        alert('Error: ' + data.message);
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-            }
+        async function markAsRead(id){
+            const ok=await confirmModal({title:'Mark as Read',message:'Mark this notification as read?',confirmText:'Mark as Read'});
+            if(!ok) return;
+            fetch('update_notification.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`id=${id}&action=read`})
+            .then(r=>r.json()).then(d=>{if(d.success){showToast('Marked as read','success'); setTimeout(()=>location.reload(),700);}else{showToast('Error: '+d.message,'error',3000);}})
+            .catch(()=>showToast('Request failed','error',3000));
         }
+
+        async function archiveNotification(id){
+            const ok=await confirmModal({title:'Archive Notification',message:'Archive this notification?',confirmText:'Archive'});
+            if(!ok) return;
+            fetch('update_notification.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`id=${id}&action=archive`})
+            .then(r=>r.json()).then(d=>{
+                if(d.success){
+                    const list = document.querySelector('.notifications-list');
+                    const row = document.getElementById('notif-'+id);
+                    const rowHTML = row ? row.outerHTML : null;
+                    // Remove from view immediately unless we are on Archived filter
+                    if(currentFilterStatus !== 'archived' && row){
+                        row.style.transition='opacity .2s ease'; row.style.opacity='0'; setTimeout(()=>row.remove(), 220);
+                    }
+                    // Show Undo to restore to 'read'
+                    showUndoToast('Notification archived', async ()=>{
+                        try{
+                            const res = await fetch('update_notification.php', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:`id=${id}&action=read`});
+                            const jr = await res.json();
+                            if(jr && jr.success){
+                                // Reinsert only if current view would show READ
+                                if((currentFilterStatus === 'all' || currentFilterStatus === 'read') && list && rowHTML){
+                                    const temp = document.createElement('div'); temp.innerHTML = rowHTML.trim();
+                                    const restored = temp.firstElementChild; if(restored){
+                                        restored.classList.remove('unread');
+                                        const target = list.firstElementChild; if(target){ list.insertBefore(restored, target); } else { list.appendChild(restored); }
+                                    }
+                                }
+                                showToast('Restored to Read');
+                            } else {
+                                showToast('Failed to restore','error',3000);
+                            }
+                        }catch(e){ showToast('Failed to restore','error',3000); }
+                    });
+                } else {
+                    showToast('Error: '+d.message,'error',3000);
+                }
+            })
+            .catch(()=>showToast('Request failed','error',3000));
+        }
+
+        async function deleteNotification(id,title){
+            const ok=await confirmModal({title:'Delete Notification',message:`Delete "${title}"? This cannot be undone.`,confirmText:'Delete',variant:'danger'});
+            if(!ok) return;
+            fetch('delete_notification.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`id=${id}`})
+            .then(r=>r.json()).then(d=>{if(d.success){showToast('Deleted','success'); setTimeout(()=>location.reload(),700);}else{showToast('Error: '+d.message,'error',3000);}})
+            .catch(()=>showToast('Request failed','error',3000));
+        }
+    </script>
+
+    <script>
+        // Auto-refresh when new notifications arrive or unread count changes
+        (function(){
+            const initialUnread = <?= json_encode((int)($stats['unread'] ?? 0)) ?>;
+            const initialLastId = <?= json_encode($current_last_id) ?>;
+            const pollMs = 15000;
+            async function checkUpdates(){
+                try {
+                    const res = await fetch('notifications_api.php', { cache: 'no-store' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (!data || !data.ok) return;
+                    const changed = (typeof data.unread === 'number' && data.unread !== initialUnread) ||
+                                    (data.last_id !== null && data.last_id !== initialLastId);
+                    if (changed) {
+                        const url = new URL(window.location.href);
+                        // Preserve existing filters
+                        window.location.href = url.pathname + url.search;
+                    }
+                } catch (e) {
+                    // ignore errors
+                }
+            }
+            setInterval(checkUpdates, pollMs);
+        })();
     </script>
 </body>
 </html>

@@ -590,11 +590,6 @@ if ($size_result) {
                                     <span class="toggle-slider"></span>
                                 </label>
                                 <small>Send email alerts for critical events (overdue, borrow, return notifications)</small>
-                                <div style="margin-top: 10px;">
-                                    <a href="test_email.php" style="color: #006633; text-decoration: none; font-size: 0.9rem;">
-                                        <i class="fas fa-envelope"></i> Test Email Configuration
-                                    </a>
-                                </div>
                             </div>
                             
                             <div class="form-group">

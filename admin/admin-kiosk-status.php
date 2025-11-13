@@ -14,12 +14,12 @@ $user = "root";
 $password = "";   
 $dbname = "capstone";
 
+// Establish DB connection but do not terminate on failure; allow health to show Offline
 $conn = @new mysqli($host, $user, $password, $dbname);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+$db_online = !($conn->connect_error);
+if ($db_online) {
+    $conn->select_db($dbname);
 }
-
-$conn->select_db($dbname);
 
 // Fetch kiosk activity statistics
 $stats = [];
@@ -27,20 +27,32 @@ $stats = [];
 // Total transactions today
 $today_start = date('Y-m-d 00:00:00');
 $today_end = date('Y-m-d 23:59:59');
-$result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_date BETWEEN '$today_start' AND '$today_end'");
-$stats['today_transactions'] = $result ? $result->fetch_assoc()['count'] : 0;
+$stats['today_transactions'] = 0;
+if ($db_online) {
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_date BETWEEN '$today_start' AND '$today_end'");
+    $stats['today_transactions'] = $result ? (int)$result->fetch_assoc()['count'] : 0;
+}
 
 // Active borrows
-$result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active'");
-$stats['active_borrows'] = $result ? $result->fetch_assoc()['count'] : 0;
+$stats['active_borrows'] = 0;
+if ($db_online) {
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active'");
+    $stats['active_borrows'] = $result ? (int)$result->fetch_assoc()['count'] : 0;
+}
 
 // Pending returns (overdue)
-$result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active' AND expected_return_date < NOW()");
-$stats['overdue_items'] = $result ? $result->fetch_assoc()['count'] : 0;
+$stats['overdue_items'] = 0;
+if ($db_online) {
+    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE status = 'Active' AND expected_return_date < NOW()");
+    $stats['overdue_items'] = $result ? (int)$result->fetch_assoc()['count'] : 0;
+}
 
 // Total users
-$result = $conn->query("SELECT COUNT(*) as count FROM users WHERE status = 'Active'");
-$stats['active_users'] = $result ? $result->fetch_assoc()['count'] : 0;
+$stats['active_users'] = 0;
+if ($db_online) {
+    $result = $conn->query("SELECT COUNT(*) as count FROM users WHERE status = 'Active'");
+    $stats['active_users'] = $result ? (int)$result->fetch_assoc()['count'] : 0;
+}
 
 // Recent kiosk activity (last 10 transactions)
 $recent_activity = [];
@@ -54,10 +66,12 @@ $query = "SELECT t.id, t.transaction_type, t.transaction_date, t.status,
           LEFT JOIN categories c ON e.category_id = c.id
           ORDER BY t.transaction_date DESC
           LIMIT 10";
-$result = $conn->query($query);
-if ($result) {
-    while ($row = $result->fetch_assoc()) {
-        $recent_activity[] = $row;
+if ($db_online) {
+    $result = $conn->query($query);
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $recent_activity[] = $row;
+        }
     }
 }
 
@@ -66,39 +80,107 @@ $hourly_data = [];
 for ($i = 23; $i >= 0; $i--) {
     $hour_start = date('Y-m-d H:00:00', strtotime("-$i hours"));
     $hour_end = date('Y-m-d H:59:59', strtotime("-$i hours"));
-    $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_date BETWEEN '$hour_start' AND '$hour_end'");
-    $count = $result ? $result->fetch_assoc()['count'] : 0;
+    $count = 0;
+    if ($db_online) {
+        $result = $conn->query("SELECT COUNT(*) as count FROM transactions WHERE transaction_date BETWEEN '$hour_start' AND '$hour_end'");
+        $count = $result ? (int)$result->fetch_assoc()['count'] : 0;
+    }
     $hourly_data[] = [
         'hour' => date('H:00', strtotime("-$i hours")),
         'count' => $count
     ];
 }
 
-// Equipment availability
+// Equipment availability (real quantities)
 $equipment_stats = [];
 $query = "SELECT 
-            COUNT(*) as total_equipment,
-            SUM(CASE WHEN i.availability_status = 'Available' THEN 1 ELSE 0 END) as available,
-            SUM(CASE WHEN i.availability_status = 'Out of Stock' THEN 1 ELSE 0 END) as out_of_stock,
-            SUM(CASE WHEN i.availability_status = 'Maintenance' THEN 1 ELSE 0 END) as maintenance
+            COUNT(*) AS total_items,
+            SUM(GREATEST(COALESCE(i.quantity, e.quantity, 0)
+                       - COALESCE(i.borrowed_quantity, 0)
+                       - COALESCE(i.damaged_quantity, 0)
+                       - COALESCE(i.maintenance_quantity, 0), 0)) AS total_available_units,
+            SUM(CASE WHEN GREATEST(COALESCE(i.quantity, e.quantity, 0)
+                       - COALESCE(i.borrowed_quantity, 0)
+                       - COALESCE(i.damaged_quantity, 0)
+                       - COALESCE(i.maintenance_quantity, 0), 0) = 0 THEN 1 ELSE 0 END) AS out_of_stock_items,
+            SUM(COALESCE(i.maintenance_quantity, 0)) AS maintenance_units
           FROM equipment e
           LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id";
-$result = $conn->query($query);
-if ($result) {
-    $equipment_stats = $result->fetch_assoc();
+if ($db_online) {
+    $result = $conn->query($query);
+    if ($result) {
+        $row = $result->fetch_assoc();
+        $equipment_stats = [
+            'total_equipment' => (int)($row['total_items'] ?? 0),
+            'available' => (int)($row['total_available_units'] ?? 0),
+            'out_of_stock' => (int)($row['out_of_stock_items'] ?? 0),
+            'maintenance' => 0
+        ];
+
+        // Override maintenance using maintenance_logs (Pending + In Progress)
+        $qMaint = "SELECT SUM(maintenance_quantity) AS total_maintenance
+                   FROM maintenance_logs
+                   WHERE status IN ('Pending','In Progress')";
+        $rMaint = $conn->query($qMaint);
+        if ($rMaint && ($m = $rMaint->fetch_assoc())) {
+            $equipment_stats['maintenance'] = (int)($m['total_maintenance'] ?? 0);
+        }
+    }
 }
 
 // System health indicators
 $system_health = [
-    'database_status' => 'Online',
+    'database_status' => $db_online ? 'Online' : 'Offline',
     'last_transaction' => null,
-    'response_time' => 'Good'
+    'response_time' => 'Unknown',
+    'kiosk_status' => 'Operational',
+    'db_class' => $db_online ? 'online' : 'offline',
+    'kiosk_class' => 'online'
 ];
 
-$result = $conn->query("SELECT MAX(transaction_date) as last_txn FROM transactions");
-if ($result) {
-    $row = $result->fetch_assoc();
-    $system_health['last_transaction'] = $row['last_txn'];
+// Measure response time (simple ping)
+if ($db_online) {
+    $start = microtime(true);
+    $ping = $conn->query("SELECT 1");
+    $elapsed = ($ping ? microtime(true) - $start : 1.0);
+    if ($elapsed < 0.2) $system_health['response_time'] = 'Good';
+    elseif ($elapsed < 0.6) $system_health['response_time'] = 'Fair';
+    else $system_health['response_time'] = 'Slow';
+
+    // Last transaction
+    $result = $conn->query("SELECT MAX(transaction_date) as last_txn FROM transactions");
+    if ($result) {
+        $row = $result->fetch_assoc();
+        $system_health['last_transaction'] = $row['last_txn'];
+    }
+
+    // Maintenance mode
+    $maintenance_mode = '0';
+    $table_check = $conn->query("SHOW TABLES LIKE 'system_settings'");
+    if ($table_check && $table_check->num_rows > 0) {
+        $stmt = $conn->prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'maintenance_mode'");
+        if ($stmt) {
+            $stmt->execute();
+            $res = $stmt->get_result();
+            if ($res && ($row = $res->fetch_assoc())) {
+                $maintenance_mode = $row['setting_value'];
+            }
+            $stmt->close();
+        }
+    }
+
+    if ($maintenance_mode === '1') {
+        $system_health['kiosk_status'] = 'Maintenance';
+        $system_health['kiosk_class'] = 'warning';
+    } else {
+        $system_health['kiosk_status'] = 'Operational';
+        $system_health['kiosk_class'] = 'online';
+    }
+} else {
+    // DB offline implies kiosk unavailable
+    $system_health['response_time'] = 'Unavailable';
+    $system_health['kiosk_status'] = 'Unavailable';
+    $system_health['kiosk_class'] = 'offline';
 }
 
 ?>
@@ -519,22 +601,22 @@ if ($result) {
 
                 <div class="health-grid">
                     <div class="health-item">
-                        <div class="health-icon online">
+                        <div id="db_icon" class="health-icon <?= htmlspecialchars($system_health['db_class']) ?>">
                             <i class="fas fa-database"></i>
                         </div>
                         <div class="health-info">
                             <div class="health-label">Database Status</div>
-                            <div class="health-value online"><?= $system_health['database_status'] ?></div>
+                            <div id="db_status_value" class="health-value <?= htmlspecialchars($system_health['db_class']) ?>"><?= htmlspecialchars($system_health['database_status']) ?></div>
                         </div>
                     </div>
 
                     <div class="health-item">
-                        <div class="health-icon online">
+                        <div id="kiosk_icon" class="health-icon <?= htmlspecialchars($system_health['kiosk_class']) ?>">
                             <i class="fas fa-desktop"></i>
                         </div>
                         <div class="health-info">
                             <div class="health-label">Kiosk System</div>
-                            <div class="health-value online">Operational</div>
+                            <div id="kiosk_status_value" class="health-value <?= htmlspecialchars($system_health['kiosk_class']) ?>"><?= htmlspecialchars($system_health['kiosk_status']) ?></div>
                         </div>
                     </div>
 
@@ -544,7 +626,7 @@ if ($result) {
                         </div>
                         <div class="health-info">
                             <div class="health-label">Response Time</div>
-                            <div class="health-value"><?= $system_health['response_time'] ?></div>
+                            <div id="response_time_value" class="health-value"><?= $system_health['response_time'] ?></div>
                         </div>
                     </div>
 
@@ -554,9 +636,7 @@ if ($result) {
                         </div>
                         <div class="health-info">
                             <div class="health-label">Last Transaction</div>
-                            <div class="health-value">
-                                <?= $system_health['last_transaction'] ? date('M d, Y H:i', strtotime($system_health['last_transaction'])) : 'No transactions yet' ?>
-                            </div>
+                            <div id="last_transaction_value" class="health-value"><?= $system_health['last_transaction'] ? date('M d, Y H:i', strtotime($system_health['last_transaction'])) : 'No transactions yet' ?></div>
                         </div>
                     </div>
                 </div>
@@ -568,21 +648,21 @@ if ($result) {
                     <h2><i class="fas fa-boxes"></i> Equipment Availability</h2>
                 </div>
 
-                <div class="equipment-overview">
+                <div id="equipment-overview" class="equipment-overview">
                     <div class="equipment-stat">
-                        <div class="equipment-number"><?= $equipment_stats['total_equipment'] ?? 0 ?></div>
+                        <div id="equipment_total" class="equipment-number"><?= $equipment_stats['total_equipment'] ?? 0 ?></div>
                         <div class="equipment-label">Total Equipment</div>
                     </div>
                     <div class="equipment-stat available">
-                        <div class="equipment-number"><?= $equipment_stats['available'] ?? 0 ?></div>
+                        <div id="equipment_available" class="equipment-number"><?= $equipment_stats['available'] ?? 0 ?></div>
                         <div class="equipment-label">Available</div>
                     </div>
                     <div class="equipment-stat out-of-stock">
-                        <div class="equipment-number"><?= $equipment_stats['out_of_stock'] ?? 0 ?></div>
+                        <div id="equipment_out_of_stock" class="equipment-number"><?= $equipment_stats['out_of_stock'] ?? 0 ?></div>
                         <div class="equipment-label">Out of Stock</div>
                     </div>
                     <div class="equipment-stat maintenance">
-                        <div class="equipment-number"><?= $equipment_stats['maintenance'] ?? 0 ?></div>
+                        <div id="equipment_maintenance" class="equipment-number"><?= $equipment_stats['maintenance'] ?? 0 ?></div>
                         <div class="equipment-label">Maintenance</div>
                     </div>
                 </div>
@@ -727,10 +807,59 @@ if ($result) {
             }
         });
 
-        // Auto-refresh every 30 seconds
-        setTimeout(() => {
-            location.reload();
-        }, 30000);
+        // Real-time updates for health + equipment
+        function setClass(el, baseSelector, newClass) {
+            if (!el) return;
+            el.classList.remove('online', 'offline', 'warning');
+            if (newClass) el.classList.add(newClass);
+        }
+
+        async function refreshKioskHealth() {
+            try {
+                const resp = await fetch('kiosk_health_api.php', { cache: 'no-store' });
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                // System health
+                const dbIcon = document.getElementById('db_icon');
+                const dbVal = document.getElementById('db_status_value');
+                const kioskIcon = document.getElementById('kiosk_icon');
+                const kioskVal = document.getElementById('kiosk_status_value');
+                const respTime = document.getElementById('response_time_value');
+                const lastTxn = document.getElementById('last_transaction_value');
+
+                if (dbIcon) setClass(dbIcon, '.health-icon', data.system_health.db_class);
+                if (dbVal) {
+                    setClass(dbVal, '.health-value', data.system_health.db_class);
+                    dbVal.textContent = data.system_health.database_status;
+                }
+                if (kioskIcon) setClass(kioskIcon, '.health-icon', data.system_health.kiosk_class);
+                if (kioskVal) {
+                    setClass(kioskVal, '.health-value', data.system_health.kiosk_class);
+                    kioskVal.textContent = data.system_health.kiosk_status;
+                }
+                if (respTime) respTime.textContent = data.system_health.response_time;
+                if (lastTxn) lastTxn.textContent = data.system_health.last_transaction
+                    ? new Date(data.system_health.last_transaction).toLocaleString()
+                    : 'No transactions yet';
+
+                // Equipment availability
+                const eqTotal = document.getElementById('equipment_total');
+                const eqAvail = document.getElementById('equipment_available');
+                const eqOut = document.getElementById('equipment_out_of_stock');
+                const eqMaint = document.getElementById('equipment_maintenance');
+                if (eqTotal) eqTotal.textContent = data.equipment.total_equipment;
+                if (eqAvail) eqAvail.textContent = data.equipment.available;
+                if (eqOut) eqOut.textContent = data.equipment.out_of_stock;
+                if (eqMaint) eqMaint.textContent = data.equipment.maintenance;
+            } catch (e) {
+                // swallow errors for polling
+            }
+        }
+
+        // Initial fetch and poll every 15s
+        refreshKioskHealth();
+        setInterval(refreshKioskHealth, 15000);
     </script>
 </body>
 </html>
