@@ -18,7 +18,7 @@ class PenaltySystem
      */
     public function penaltyExistsForTransaction(int $transactionId): bool
     {
-        $sql = "SELECT 1 FROM penalties WHERE transaction_id = ? LIMIT 1";
+        $sql = "SELECT 1 FROM penalties WHERE transaction_id = ? AND status <> 'Cancelled' LIMIT 1";
         $stmt = $this->conn->prepare($sql);
         if (!$stmt) return false;
         $stmt->bind_param('i', $transactionId);
@@ -62,12 +62,16 @@ class PenaltySystem
             $userId = $this->resolveUserId($borrowerIdentifier);
         }
 
-        if ($transactionId === null || $penaltyType === '') {
+        // Require at minimum: a guideline/type and equipment name, and either a transaction_id or a user identifier
+        if ($penaltyType === '' || $equipmentName === '') {
+            return false;
+        }
+        if ($transactionId === null && $userId === null && $borrowerIdentifier === '') {
             return false;
         }
 
-        // Prevent duplicate penalties for the same transaction
-        if ($this->penaltyExistsForTransaction($transactionId)) {
+        // Prevent duplicate penalties for the same transaction (only when a transaction id is provided)
+        if (!empty($transactionId) && $this->penaltyExistsForTransaction($transactionId)) {
             error_log('PenaltySystem::createPenalty blocked: penalty already exists for transaction ' . $transactionId);
             return false;
         }
@@ -177,6 +181,47 @@ class PenaltySystem
                 notifyDamagedEquipment($this->conn, $equipmentName, $student_id, $damageNotes ?: 'Damage detected');
             } elseif ($penaltyType === 'Loss' && $equipmentName) {
                 notifyLostEquipment($this->conn, $equipmentName, $student_id);
+            }
+        }
+
+        // If a returned item is penalized for Damage, update inventory accordingly
+        if ($penaltyId && $penaltyType === 'Damage' && !empty($transactionId)) {
+            try {
+                $txn = null;
+                $lookup = $this->conn->prepare("SELECT return_verification_status, condition_after, equipment_id FROM transactions WHERE id = ? LIMIT 1");
+                if ($lookup) {
+                    $lookup->bind_param('i', $transactionId);
+                    if ($lookup->execute()) {
+                        $res = $lookup->get_result();
+                        $txn = $res ? $res->fetch_assoc() : null;
+                    }
+                    $lookup->close();
+                }
+
+                if ($txn) {
+                    $rvStatus = $txn['return_verification_status'] ?? '';
+                    $condAfter = strtolower(trim((string)($txn['condition_after'] ?? '')));
+                    $equipId = $this->conn->real_escape_string((string)($txn['equipment_id'] ?? $equipmentId));
+
+                    // If it was verified as Good but now penalized as Damage, move one unit from available to damaged
+                    if (in_array($rvStatus, ['Verified','Damage','Flagged','Pending','Analyzing'], true)) {
+                        if ($condAfter !== 'damaged' && $equipId !== '') {
+                            $invSql = "UPDATE inventory SET 
+                                damaged_quantity = COALESCE(damaged_quantity, 0) + 1,
+                                available_quantity = GREATEST(quantity - COALESCE(borrowed_quantity,0) - (COALESCE(damaged_quantity,0) + 1) - COALESCE(maintenance_quantity, 0), 0),
+                                availability_status = CASE
+                                    WHEN GREATEST(quantity - COALESCE(borrowed_quantity,0) - (COALESCE(damaged_quantity,0) + 1) - COALESCE(maintenance_quantity, 0), 0) <= 0 THEN 'Not Available'
+                                    WHEN GREATEST(quantity - COALESCE(borrowed_quantity,0) - (COALESCE(damaged_quantity,0) + 1) - COALESCE(maintenance_quantity, 0), 0) <= COALESCE(minimum_stock_level, 1) THEN 'Low Stock'
+                                    ELSE 'Available'
+                                END,
+                                last_updated = NOW()
+                            WHERE equipment_id = '$equipId'";
+                            $this->conn->query($invSql);
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                error_log('PenaltySystem::createPenalty inventory adjust skipped: ' . $e->getMessage());
             }
         }
 
@@ -410,6 +455,20 @@ class PenaltySystem
         $conditions = [];
         $params = [];
         $types = '';
+
+        // Exclude Cancelled and Resolved by default unless explicitly requested
+        $statusFilter = $filters['status'] ?? 'all';
+        $includeCancelled = !empty($filters['include_cancelled']);
+        $includeResolved = !empty($filters['include_resolved']);
+        if ($statusFilter === 'all' || empty($statusFilter)) {
+            if (!$includeCancelled && !$includeResolved) {
+                $conditions[] = "p.status NOT IN ('Cancelled','Resolved')";
+            } elseif (!$includeCancelled) {
+                $conditions[] = "p.status <> 'Cancelled'";
+            } elseif (!$includeResolved) {
+                $conditions[] = "p.status <> 'Resolved'";
+            }
+        }
 
         if (!empty($filters['status']) && $filters['status'] !== 'all') {
             $conditions[] = 'p.status = ?';

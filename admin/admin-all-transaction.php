@@ -75,7 +75,7 @@ if ($users_table_exists) {
          LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
          WHERE NOT (
              t.return_verification_status = 'Verified'
-             OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id)
+             OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id AND p.status <> 'Cancelled')
          )
          ORDER BY t.transaction_date DESC";
 } else {
@@ -96,7 +96,7 @@ if ($users_table_exists) {
          LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
          WHERE NOT (
              t.return_verification_status = 'Verified'
-             OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id)
+             OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id AND p.status <> 'Cancelled')
          )
          ORDER BY t.transaction_date DESC";
 }

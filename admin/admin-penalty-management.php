@@ -233,6 +233,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $penalty_type = $guideline['penalty_type'] ?? '';
                 $penalty_amount = (float)($guideline['penalty_amount'] ?? 0);
                 $penalty_description = $guideline['penalty_description'] ?? '';
+                // Fallback: infer penalty_type from guideline name when missing
+                if ($penalty_type === '') {
+                    $gname = strtolower(trim((string)($guideline['guideline_name'] ?? $guideline['title'] ?? '')));
+                    if ($gname !== '') {
+                        if (strpos($gname, 'loss') !== false || strpos($gname, 'lost') !== false) {
+                            $penalty_type = 'Loss';
+                        } elseif (strpos($gname, 'damage') !== false || strpos($gname, 'damaged') !== false || strpos($gname, 'repair') !== false) {
+                            $penalty_type = 'Damage';
+                        } elseif (strpos($gname, 'late') !== false || strpos($gname, 'overdue') !== false) {
+                            $penalty_type = 'Late Return';
+                        }
+                    }
+                }
             } else {
                 $guideline_is_active = false;
             }
@@ -241,7 +254,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $payload = [
             'transaction_id' => (int)($_POST['transaction_id'] ?? 0),
             'user_id' => (int)($_POST['user_id'] ?? 0) ?: null,
-            'borrower_identifier' => trim($_POST['rfid_id'] ?? ''),
+            // Borrower identifier can be RFID or Student ID (manual)
+            'borrower_identifier' => trim($_POST['rfid_id'] ?? ($_POST['manual_student_id'] ?? ($_POST['student_id'] ?? ''))),
             'penalty_type' => $penalty_type,
             'guideline_id' => $guideline_id ?: null,
             'equipment_id' => trim($_POST['equipment_id'] ?? ''),
@@ -263,8 +277,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         if (!$guideline_is_active) {
             $error_message = "Selected guideline is not active. Please pick an active penalty guideline.";
-        } elseif ($payload['transaction_id'] <= 0 || $payload['penalty_type'] === '' || $payload['equipment_name'] === '') {
-            $error_message = "Please complete all required fields for creating a penalty.";
+        } elseif ($payload['penalty_type'] === '' || $payload['equipment_name'] === '' ||
+                  (empty($payload['transaction_id']) && empty($payload['user_id']) && $payload['borrower_identifier'] === '')) {
+            $error_message = "Please provide a Penalty Guideline and Equipment Name, and either a Transaction ID or a Student/RFID identifier.";
         } else {
 
             // Block duplicate penalties for the same transaction
@@ -392,8 +407,8 @@ $stats = $penaltySystem->getPenaltyStatistics();
             <header class="top-header">
                 <h1 class="page-title">Penalty Management</h1>
                 <div class="header-actions">
-                    <button type="button" id="addPenaltyBtn" class="btn btn-success" onclick="openManualPenaltyModal(event)">
-                        <i class="fas fa-plus"></i> Add Penalty
+                    <button type="button" id="quickPenaltyBtn" class="btn btn-success" onclick="openQuickPenalty()">
+                        <i class="fas fa-bolt"></i> Quick Penalty
                     </button>
                 </div>
 
@@ -450,103 +465,125 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 </div>
             <?php endif; ?>
 
-            <!-- Penalty Statistics -->
+            <!-- Penalty Statistics (Simplified) -->
             <section class="content-section">
-                <div class="section-header">
-                    <h2><i class="fas fa-chart-bar"></i> Penalty Snapshot</h2>
+                <div class="section-header" style="align-items:center; gap:12px;">
+                    <h2 style="margin:0;"><i class="fas fa-chart-bar"></i> Penalty Snapshot</h2>
+                    <?php
+                        $activeStatuses = ['Pending','Under Review','Awaiting Student Action','Repair in Progress','Awaiting Inspection','Appealed'];
+                        $activeCount = 0;
+                        foreach ($activeStatuses as $s) {
+                            $activeCount += (int)($stats['by_status'][$s]['count'] ?? 0);
+                        }
+                        $resolvedCount = (int)($stats['by_status']['Resolved']['count'] ?? 0);
+                        $damageCases = (int)($stats['damage_cases'] ?? 0);
+                        $lateReturns = (int)($stats['late_return_cases'] ?? 0);
+                    ?>
                 </div>
 
-                <div class="stats-grid">
+                <div class="stats-grid" style="grid-template-columns: repeat(4, minmax(160px,1fr));">
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: #ffc107; color: white;">
-                            <i class="fas fa-exclamation-triangle"></i>
+                        <div class="stat-icon" style="background:#0ea5e9;color:#fff;">
+                            <i class="fas fa-bell"></i>
                         </div>
                         <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Pending']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Pending</p>
+                            <h3 class="stat-number"><?= number_format($activeCount) ?></h3>
+                            <p class="stat-label">Active Penalties</p>
                         </div>
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: #17a2b8; color: white;">
-                            <i class="fas fa-search"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Under Review']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Under Review</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background: #ff7043; color: white;">
-                            <i class="fas fa-user-clock"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Awaiting Student Action']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Awaiting Student</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background: #20c997; color: white;">
-                            <i class="fas fa-screwdriver-wrench"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Repair in Progress']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Repair in Progress</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background: #6f42c1; color: white;">
-                            <i class="fas fa-clipboard-check"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Awaiting Inspection']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Awaiting Inspection</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background: #dc3545; color: white;">
+                        <div class="stat-icon" style="background:#ef4444;color:#fff;">
                             <i class="fas fa-hammer"></i>
                         </div>
                         <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['damage_cases']) ?></h3>
+                            <h3 class="stat-number"><?= number_format($damageCases) ?></h3>
                             <p class="stat-label">Damage Cases</p>
                         </div>
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: #fd7e14; color: white;">
+                        <div class="stat-icon" style="background:#f59e0b;color:#fff;">
                             <i class="fas fa-clock"></i>
                         </div>
                         <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['late_return_cases'] ?? 0) ?></h3>
+                            <h3 class="stat-number"><?= number_format($lateReturns) ?></h3>
                             <p class="stat-label">Late Returns</p>
                         </div>
                     </div>
 
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: #28a745; color: white;">
+                        <div class="stat-icon" style="background:#22c55e;color:#fff;">
                             <i class="fas fa-check-circle"></i>
                         </div>
                         <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Resolved']['count'] ?? 0) ?></h3>
+                            <h3 class="stat-number"><?= number_format($resolvedCount) ?></h3>
                             <p class="stat-label">Resolved</p>
                         </div>
                     </div>
+                </div>
 
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background: #6c757d; color: white;">
-                            <i class="fas fa-gavel"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 class="stat-number"><?= number_format($stats['by_status']['Appealed']['count'] ?? 0) ?></h3>
-                            <p class="stat-label">Appealed</p>
+                <div style="margin-top:10px;">
+                    <button type="button" id="toggleBreakdown" class="btn btn-secondary" style="padding:6px 10px; font-size:12px;">
+                        <i class="fas fa-list"></i> Show Status Breakdown
+                    </button>
+                </div>
+
+                <div id="statusBreakdown" style="display:none; margin-top:12px;">
+                    <div class="stats-grid" style="grid-template-columns: repeat(5, minmax(160px,1fr));">
+                        <?php foreach ($activeStatuses as $label): ?>
+                            <?php
+                                $color = '#94a3b8';
+                                $icon = 'circle';
+                                switch ($label) {
+                                    case 'Pending':
+                                        $color = '#f59e0b'; $icon = 'exclamation-triangle'; break;
+                                    case 'Under Review':
+                                        $color = '#0ea5e9'; $icon = 'search'; break;
+                                    case 'Awaiting Student Action':
+                                        $color = '#fb923c'; $icon = 'user-clock'; break;
+                                    case 'Repair in Progress':
+                                        $color = '#14b8a6'; $icon = 'screwdriver-wrench'; break;
+                                    case 'Awaiting Inspection':
+                                        $color = '#8b5cf6'; $icon = 'clipboard-check'; break;
+                                }
+                            ?>
+                            <div class="stat-card">
+                                <div class="stat-icon" style="background:<?= $color ?>;color:#fff;filter:none;">
+                                    <i class="fas fa-<?= $icon ?>"></i>
+                                </div>
+                                <div class="stat-content">
+                                    <h3 class="stat-number"><?= number_format($stats['by_status'][$label]['count'] ?? 0) ?></h3>
+                                    <p class="stat-label"><?= htmlspecialchars($label) ?></p>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background:#6b7280;color:#fff;filter:none;">
+                                <i class="fas fa-gavel"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 class="stat-number"><?= number_format($stats['by_status']['Appealed']['count'] ?? 0) ?></h3>
+                                <p class="stat-label">Appealed</p>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                <script>
+                    (function(){
+                        const btn = document.getElementById('toggleBreakdown');
+                        const panel = document.getElementById('statusBreakdown');
+                        if (!btn || !panel) return;
+                        btn.addEventListener('click', () => {
+                            const open = panel.style.display !== 'none';
+                            panel.style.display = open ? 'none' : '';
+                            btn.innerHTML = open
+                                ? '<i class="fas fa-list"></i> Show Status Breakdown'
+                                : '<i class="fas fa-compress"></i> Hide Status Breakdown';
+                        });
+                    })();
+                </script>
             </section>
 
             <!-- Damage Penalty Creation Form (from Transaction Review) -->
@@ -829,6 +866,8 @@ $stats = $penaltySystem->getPenaltyStatistics();
         </main>
     </div>
     
+    
+
     <!-- Penalty Detail Modal -->
     <div id="penaltyDetailModal" class="penalty-detail-modal">
         <div id="penaltyDetailContent" class="penalty-detail-content">
@@ -976,13 +1015,18 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
                 <div class="form-group">
                     <label for="transaction_id">Transaction ID (Optional)</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="number" id="transaction_id" name="transaction_id" min="1" placeholder="Leave blank for manual entry" style="flex: 1;">
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;">
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <select id="transaction_select" style="min-width: 220px; display:none;">
+                                <option value="">-- Select eligible transaction --</option>
+                            </select>
+                            <input type="number" id="transaction_id" name="transaction_id" min="1" placeholder="Leave blank for manual entry" style="flex: 1;">
+                        </div>
                         <button type="button" class="btn btn-secondary" onclick="loadTransactionDetails()" style="white-space: nowrap;">
                             <i class="fas fa-download"></i> Load from Transaction
                         </button>
                     </div>
-                    <small class="form-hint">Optional: Load equipment details from existing transaction</small>
+                    <small class="form-hint">If Student ID/RFID is provided, you'll see only Damage/Flagged transactions here.</small>
                 </div>
 
                 <div class="form-row" style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
@@ -2660,14 +2704,83 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     if (data.success && data.student) {
                         document.getElementById('user_id').value = data.student.id || '';
                         document.getElementById('rfid_id').value = data.student.rfid_tag || '';
+                        // Populate eligible transactions for this student
+                        fetchEligibleTransactions(studentId, data.student.rfid_tag || '');
                     } else {
                         alert('Student not found. Please verify the Student ID.');
+                        // Clear dropdown
+                        populateTransactionSelect([]);
                     }
                 })
                 .catch(error => {
                     console.error('Error searching student:', error);
                 });
         }
+
+        function fetchEligibleTransactions(studentId, rfid) {
+            const params = new URLSearchParams();
+            if (studentId) params.set('student_id', studentId);
+            if (rfid) params.set('rfid', rfid);
+            if ([...params.keys()].length === 0) return;
+
+            fetch(`api/list_user_transactions.php?${params.toString()}`)
+                .then(r => r.json())
+                .then(d => {
+                    if (d && d.success) {
+                        populateTransactionSelect(d.transactions || []);
+                    } else {
+                        populateTransactionSelect([]);
+                    }
+                })
+                .catch(err => {
+                    console.error('Failed to fetch eligible transactions', err);
+                    populateTransactionSelect([]);
+                });
+        }
+
+        function populateTransactionSelect(items) {
+            const sel = document.getElementById('transaction_select');
+            const input = document.getElementById('transaction_id');
+            if (!sel || !input) return;
+
+            // Reset
+            sel.innerHTML = '<option value="">-- Select eligible transaction --</option>';
+
+            if (Array.isArray(items) && items.length > 0) {
+                items.forEach(it => {
+                    const label = `#${it.id} — ${it.equipment_name || it.equipment_id || 'Equipment'} (${it.status})`;
+                    const opt = document.createElement('option');
+                    opt.value = it.id;
+                    opt.textContent = label;
+                    sel.appendChild(opt);
+                });
+                sel.style.display = '';
+                // Prefer dropdown; keep input visible for manual overrides
+                if (!input.value) {
+                    input.value = items[0].id;
+                }
+            } else {
+                // No eligible items
+                sel.style.display = 'none';
+            }
+        }
+
+        // Sync dropdown to input
+        (function(){
+            const sel = document.getElementById('transaction_select');
+            const input = document.getElementById('transaction_id');
+            if (sel && input) {
+                sel.addEventListener('change', () => {
+                    input.value = sel.value || '';
+                });
+            }
+            // Also try to fetch list if RFID is prefilled
+            const rfidEl = document.getElementById('rfid_id');
+            const studEl = document.getElementById('manual_student_id');
+            if (rfidEl && studEl && (rfidEl.value || studEl.value)) {
+                fetchEligibleTransactions(studEl.value || '', rfidEl.value || '');
+            }
+        })();
 
         function loadTransactionDetails() {
             const transactionId = document.getElementById('transaction_id').value;
@@ -2793,6 +2906,14 @@ $stats = $penaltySystem->getPenaltyStatistics();
         });
 
         // Sidebar toggle functionality handled by sidebar component
+    </script>
+
+    <script>
+        function openQuickPenalty() {
+            if (typeof openManualPenaltyModal === 'function') {
+                openManualPenaltyModal();
+            }
+        }
     </script>
 
     <!-- Toast Container -->

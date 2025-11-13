@@ -39,12 +39,12 @@ $stmt = $conn->prepare("
         t.actual_return_date,
         u.student_id,
         u.rfid_tag,
-        u.name as user_name,
-        e.name as equipment_name,
-        e.rfid_tag as equipment_rfid
+        COALESCE(u.name, u.full_name, u.username) AS user_name,
+        e.name AS equipment_name,
+        e.rfid_tag AS equipment_rfid
     FROM transactions t
     LEFT JOIN users u ON t.user_id = u.id
-    LEFT JOIN equipment e ON t.equipment_id = e.id
+    LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag
     WHERE t.id = ?
     LIMIT 1
 ");
@@ -56,8 +56,8 @@ $result = $stmt->get_result();
 if ($result->num_rows > 0) {
     $transaction = $result->fetch_assoc();
 
-    // Check if a penalty already exists for this transaction
-    $p = $conn->prepare("SELECT 1 FROM penalties WHERE transaction_id = ? LIMIT 1");
+    // Check if a non-cancelled penalty already exists for this transaction
+    $p = $conn->prepare("SELECT 1 FROM penalties WHERE transaction_id = ? AND status <> 'Cancelled' LIMIT 1");
     if ($p) {
         $p->bind_param('i', $transaction['id']);
         $p->execute();

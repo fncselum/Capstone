@@ -39,8 +39,8 @@ if ($users_table_exists && !in_array('student_id', $user_columns) && in_array('i
     $student_id_col = 'u.id as student_id';
 }
 
-// Archived definition: verified OR has penalty record (returned alone is not enough)
-$whereArchived = "(t.return_verification_status = 'Verified' OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id))";
+// Archived definition: verified OR has an active (non-cancelled) penalty record
+$whereArchived = "(t.return_verification_status = 'Verified' OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id AND p.status <> 'Cancelled'))";
 
 $query = "SELECT t.*, 
                 COALESCE(t.transaction_date, t.created_at) AS txn_datetime,
@@ -53,7 +53,7 @@ $query = "SELECT t.*,
                 inv.availability_status AS inventory_status,
                 inv.available_quantity AS inventory_available_qty,
                 inv.borrowed_quantity AS inventory_borrowed_qty,
-                (EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id)) AS has_penalty
+                (EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id AND p.status <> 'Cancelled')) AS has_penalty
          FROM transactions t
          LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag
          " . ($users_table_exists ? "LEFT JOIN users u ON t.user_id = u.id" : "") . "

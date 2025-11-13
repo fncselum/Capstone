@@ -175,6 +175,40 @@ try {
     }
     $update->close();
 
+    // Update inventory upon verification similar to API handler
+    if ($action === 'verify') {
+        $equipmentId = $conn->real_escape_string($transaction['equipment_id']);
+        // Determine condition from severity
+        $isDamaged = !in_array(strtolower($severityLevel), ['none', 'minor']);
+        if ($isDamaged) {
+            $invSql = "UPDATE inventory SET 
+                        borrowed_quantity = GREATEST(borrowed_quantity - 1, 0),
+                        damaged_quantity = COALESCE(damaged_quantity, 0) + 1,
+                        available_quantity = GREATEST(quantity - (borrowed_quantity - 1) - (COALESCE(damaged_quantity, 0) + 1) - COALESCE(maintenance_quantity, 0), 0),
+                        availability_status = CASE
+                            WHEN GREATEST(quantity - (borrowed_quantity - 1) - (COALESCE(damaged_quantity, 0) + 1) - COALESCE(maintenance_quantity, 0), 0) <= 0 THEN 'Not Available'
+                            WHEN GREATEST(quantity - (borrowed_quantity - 1) - (COALESCE(damaged_quantity, 0) + 1) - COALESCE(maintenance_quantity, 0), 0) <= COALESCE(minimum_stock_level, 1) THEN 'Low Stock'
+                            ELSE 'Available'
+                        END,
+                        last_updated = NOW()
+                      WHERE equipment_id = '$equipmentId'";
+        } else {
+            $invSql = "UPDATE inventory SET 
+                        borrowed_quantity = GREATEST(borrowed_quantity - 1, 0),
+                        available_quantity = GREATEST(quantity - (borrowed_quantity - 1) - COALESCE(damaged_quantity, 0) - COALESCE(maintenance_quantity, 0), 0),
+                        availability_status = CASE
+                            WHEN GREATEST(quantity - (borrowed_quantity - 1) - COALESCE(damaged_quantity, 0) - COALESCE(maintenance_quantity, 0), 0) <= 0 THEN 'Not Available'
+                            WHEN GREATEST(quantity - (borrowed_quantity - 1) - COALESCE(damaged_quantity, 0) - COALESCE(maintenance_quantity, 0), 0) <= COALESCE(minimum_stock_level, 1) THEN 'Low Stock'
+                            ELSE 'Available'
+                        END,
+                        last_updated = NOW()
+                      WHERE equipment_id = '$equipmentId'";
+        }
+        if (!$conn->query($invSql)) {
+            throw new Exception('Failed to update inventory: ' . $conn->error);
+        }
+    }
+
     $conn->commit();
 
     // Create notification for return verification
