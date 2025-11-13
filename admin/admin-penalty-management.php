@@ -1063,21 +1063,116 @@ $stats = $penaltySystem->getPenaltyStatistics();
             border-radius: 8px;
             display: flex;
             align-items: center;
-            gap: 10px;
         }
-        
+
+        /* Sticky header with horizontal status tracker */
+        .penalty-detail-header {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: #ffffff;
+            border-bottom: 1px solid #e9ecef;
+            padding: 10px 14px;
+        }
+
+        .penalty-detail-header .header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .status-tracker {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: nowrap;
+            flex: 1 1 auto;
+            max-width: 520px;
+            justify-content: space-between;
+            padding: 4px 6px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            min-height: 34px;
+        }
+
+        .status-step {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+            font-weight: 600;
+            color: #6c757d;
+            flex: 1 1 0;
+            min-width: 0;
+            font-size: 0.82rem;
+        }
+
+        .status-step .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #dee2e6;
+            box-shadow: 0 0 0 2px #e9ecef inset;
+        }
+
+        .status-step.done { color: #2e7d32; }
+        .status-step.done .dot {
+            background: #28a745;
+            box-shadow: 0 0 0 2px rgba(40,167,69,0.25);
+        }
+
+        .status-step.current { color: #0d6efd; }
+        .status-step.current .dot {
+            background: #0d6efd;
+            box-shadow: 0 0 0 2px rgba(13,110,253,0.25);
+        }
+
+        .status-divider {
+            width: 14px;
+            height: 2px;
+            background: #e0e0e0;
+            flex: 0 0 14px;
+        }
+
+        .status-step span:last-child {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Label behavior per state */
+        .status-step .label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .status-step.done .label {
+            display: none;
+        }
+
+        .status-step.current { flex: 2 1 0; }
+        .status-step.current .label { font-size: 0.9rem; }
+        .status-step.future .label { opacity: 0.9; }
+
+        @media (max-width: 640px) {
+            .status-tracker { max-width: 100%; }
+            .status-step span:last-child { font-size: 0.78rem; }
+            .status-divider { width: 10px; flex-basis: 10px; }
+        }
+
         .alert-success {
             background: #d4edda;
             color: #155724;
             border-left: 4px solid #28a745;
         }
-        
+
         .alert-error {
             background: #f8d7da;
             color: #721c24;
             border-left: 4px solid #dc3545;
         }
-        
+
         .filter-form {
             display: flex;
             gap: 15px;
@@ -1088,7 +1183,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
             border-radius: 8px;
             border: 1px solid #dee2e6;
         }
-        
+
         .filter-group {
             display: flex;
             flex-direction: column;
@@ -1099,7 +1194,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
         .filter-group.search {
             flex: 2;
         }
-        
+
         .filter-group label {
             font-weight: 600;
             color: #495057;
@@ -1120,11 +1215,11 @@ $stats = $penaltySystem->getPenaltyStatistics();
             border-color: #80bdff;
             box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
         }
-        
+
         .table-container {
             overflow-x: auto;
         }
-        
+
         .penalties-table {
             width: 100%;
             border-collapse: collapse;
@@ -1132,40 +1227,40 @@ $stats = $penaltySystem->getPenaltyStatistics();
             border-radius: 8px;
             overflow: hidden;
         }
-        
+
         .penalties-table th,
         .penalties-table td {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #dee2e6;
         }
-        
+
         .penalties-table th {
             background: #006633;
             font-weight: 600;
             color: white;
             font-size: 0.9rem;
         }
-        
+
         .penalties-table tbody tr:hover {
             background: #f8f9fa;
         }
-        
+
         .student-info {
             line-height: 1.4;
         }
-        
+
         .student-info small {
             color: #666;
         }
-        
+
         .rfid-id {
             font-family: monospace;
             background: #e9ecef;
             padding: 2px 6px;
             border-radius: 4px;
         }
-        
+
         .badge.penalty-type {
             padding: 4px 10px;
             border-radius: 12px;
@@ -1173,25 +1268,25 @@ $stats = $penaltySystem->getPenaltyStatistics();
             font-weight: 600;
             display: inline-block;
         }
-        
+
         .badge.penalty-type.overdue,
         .badge.penalty-type.late-return {
             background: #ffc107;
             color: #000;
         }
-        
+
         .badge.penalty-type.damaged,
         .badge.penalty-type.damage {
             background: #dc3545;
             color: white;
         }
-        
+
         .badge.penalty-type.lost,
         .badge.penalty-type.loss {
             background: #6c757d;
             color: white;
         }
-        
+
         .badge.status {
             padding: 4px 10px;
             border-radius: 12px;
@@ -1199,24 +1294,24 @@ $stats = $penaltySystem->getPenaltyStatistics();
             font-weight: 600;
             display: inline-block;
         }
-        
+
         .badge.status.pending {
             background: #ffc107;
             color: #000;
         }
-        
+
         .badge.status.resolved,
         .badge.status.paid {
             background: #28a745;
             color: white;
         }
-        
+
         .badge.status.cancelled,
         .badge.status.waived {
             background: #6c757d;
             color: white;
         }
-        
+
         .badge.status.under-review {
             background: #17a2b8;
             color: white;
@@ -1241,43 +1336,43 @@ $stats = $penaltySystem->getPenaltyStatistics();
             background: #6c5ce7;
             color: white;
         }
-        
+
         .amount {
             font-weight: 600;
             color: #dc3545;
         }
-        
+
         .action-buttons {
             display: flex;
             gap: 5px;
             flex-wrap: wrap;
             align-items: center;
         }
-        
+
         .btn-small {
             padding: 6px 10px;
             font-size: 0.8rem;
             white-space: nowrap;
         }
-        
+
         .btn-info {
             background: #17a2b8;
             color: white;
         }
-        
+
         .btn-info:hover {
             background: #138496;
         }
-        
+
         .btn-warning {
             background: #ffc107;
             color: #212529;
         }
-        
+
         .btn-warning:hover {
             background: #e0a800;
         }
-        
+
         .text-muted {
             color: #6c757d;
             font-style: italic;
@@ -1318,23 +1413,23 @@ $stats = $penaltySystem->getPenaltyStatistics();
             align-items: center;
             gap: 10px;
         }
-        
+
         .alert-warning {
             background-color: #fff3cd;
             border: 1px solid #ffc107;
             color: #856404;
         }
-        
+
         .alert-info {
             background-color: #d1ecf1;
             border: 1px solid #17a2b8;
             color: #0c5460;
         }
-        
+
         .alert i {
             font-size: 1.2rem;
         }
-        
+
         .modal {
             display: none;
             position: fixed;
@@ -1345,7 +1440,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
             height: 100%;
             background-color: rgba(0,0,0,0.5);
         }
-        
+
         .modal-content {
             background: white;
             margin: 5% auto;
@@ -1363,7 +1458,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
             font-size: 1.4rem;
             font-weight: 600;
         }
-        
+
         .close {
             position: absolute;
             right: 15px;
@@ -1379,17 +1474,17 @@ $stats = $penaltySystem->getPenaltyStatistics();
             justify-content: center;
             border-radius: 50%;
         }
-        
+
         .close:hover {
             color: #2d3436;
             background: #f0f0f0;
             transform: rotate(90deg);
         }
-        
+
         .form-group {
             margin-bottom: 20px;
         }
-        
+
         .form-group label {
             display: block;
             margin-bottom: 8px;
@@ -1397,7 +1492,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
             color: #495057;
             font-size: 0.9rem;
         }
-        
+
         .form-group select,
         .form-group input,
         .form-group textarea {
@@ -1421,14 +1516,14 @@ $stats = $penaltySystem->getPenaltyStatistics();
             resize: vertical;
             min-height: 80px;
         }
-        
+
         .form-actions {
             display: flex;
             gap: 10px;
             justify-content: flex-end;
             margin-top: 20px;
         }
-        
+
         .form-help {
             font-size: 0.8rem;
             color: #666;
@@ -1443,7 +1538,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
             margin-top: 6px;
             font-style: italic;
         }
-        
+
         .penalty-preview {
             background: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -2248,13 +2343,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 return;
             }
 
-            const escapeHtml = (unsafe = '') => String(unsafe)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
-
             const severityBadge = {
                 minor: '<span class="penalty-badge" style="background:#e8f5e9;color:#2e7d32"><i class="fas fa-circle-info"></i> Minor</span>',
                 moderate: '<span class="penalty-badge" style="background:#fff3e0;color:#e65100"><i class="fas fa-triangle-exclamation"></i> Moderate</span>',
@@ -2332,10 +2420,24 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     </li>`;
             }).join('');
 
+            const trackerSteps = statusSequence.map((label, idx) => {
+                const cls = idx < currentStatusIndex ? 'done' : (idx === currentStatusIndex ? 'current' : 'future');
+                return `
+                    <div class="status-step ${cls}">
+                        <span class="dot"></span>
+                        <span class="label">${label}</span>
+                    </div>`;
+            }).join('<div class="status-divider"></div>');
+
+            const trackerMarkup = `<div class="status-tracker">${trackerSteps}</div>`;
+
             content.innerHTML = `
                     <div class="penalty-detail-header">
-                        <h2><i class="fas fa-file-invoice"></i> Damage Penalty Details #${data.id}</h2>
-                        <button class="penalty-detail-close" onclick="closePenaltyDetailModal()">×</button>
+                        <div class="header-row">
+                            <h2><i class="fas fa-file-invoice"></i> Damage Penalty Details #${data.id}</h2>
+                            ${trackerMarkup}
+                            <button class="penalty-detail-close" onclick="closePenaltyDetailModal()">×</button>
+                        </div>
                     </div>
                     <div class="penalty-detail-body">
                         <div class="detail-grid">
@@ -2370,12 +2472,6 @@ $stats = $penaltySystem->getPenaltyStatistics();
                             ${detectedIssuesHtml}
                             ${damageNotesHtml}
                             ${finalDecisionHtml}
-                            <div class="detail-section full-width-section">
-                                <h3><i class="fas fa-route"></i> Status Timeline</h3>
-                                <ul class="penalty-timeline">
-                                    ${historyMarkup || '<li class="timeline-step current"><div class="timeline-dot"></div><div class="timeline-content"><div class="timeline-header"><span class="timeline-status">'+ (data.status || 'Pending') +'</span></div><div class="timeline-submeta">No status history recorded yet.</div></div></li>'}
-                                </ul>
-                            </div>
                         </div>
                         <div class="action-buttons">
                             <button class="btn btn-secondary" onclick="closePenaltyDetailModal()"><i class="fas fa-times"></i> Close</button>
