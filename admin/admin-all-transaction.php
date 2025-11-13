@@ -1484,6 +1484,9 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
                 <div class="detected-issues-section">
                     <h4>Detected Issues</h4>
                     <div id="detectedIssuesDisplay" class="detected-issues-content">No issues detected</div>
+                    <div id="manualReviewNote" style="margin-top:8px;color:#6b7280;font-size:0.9em;display:none;">
+                        Go to <strong>Return Verification</strong> for manual review.
+                    </div>
                 </div>
                 <div class="return-review-buttons">
                     <button type="button" class="approval-btn approve-btn" data-review-action="verify">Mark Verified</button>
@@ -1737,6 +1740,27 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
             applyDetectedIssuesUI(info.detectedIssues);
             activeReturnReview.offlineSimilarityScore = info.similarityScore ?? null;
             
+            // Hide action buttons if manual review is required or item indicates damage
+            try {
+                const actionsContainer = document.querySelector('.return-review-buttons');
+                const reviewStatus = (info.reviewStatus || '').toLowerCase();
+                const verificationStatus = (info.verificationStatus || '').toLowerCase();
+                const issuesText = (info.detectedIssues || '').toLowerCase();
+                const requiresManual = reviewStatus.includes('manual') || reviewStatus.includes('review required') || issuesText.includes('manual review');
+                const indicatesDamage = issuesText.includes('damaged') || issuesText.includes('damage');
+                const manualNote = document.getElementById('manualReviewNote');
+                if (actionsContainer) {
+                    if (requiresManual || indicatesDamage) {
+                        actionsContainer.style.display = 'none';
+                    } else {
+                        actionsContainer.style.display = '';
+                    }
+                }
+                if (manualNote) {
+                    manualNote.style.display = (requiresManual || indicatesDamage) ? 'block' : 'none';
+                }
+            } catch (e) {}
+
             resetReturnReviewNotes();
             if (returnReviewModal) {
                 returnReviewModal.style.display = 'flex';
@@ -2563,6 +2587,50 @@ echo $count_check ? $count_check->fetch_assoc()['cnt'] : 'Unable to check';
         document.addEventListener('DOMContentLoaded', function() {
             // Start polling for analyzing transactions
             startPollingForAnalyzing();
+
+            // Auto-refresh the transactions table without a full page reload
+            async function refreshTransactionsTable() {
+                try {
+                    const currentFilterSnapshot = currentFilter;
+                    const searchInputEl = document.getElementById('searchInput');
+                    const currentSearch = searchInputEl ? searchInputEl.value : '';
+
+                    const response = await fetch(window.location.href, { cache: 'no-store', credentials: 'same-origin' });
+                    if (!response.ok) return;
+                    const html = await response.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const newTable = doc.getElementById('transactionsTable');
+                    const container = document.querySelector('.transactions-table');
+                    if (newTable && container) {
+                        const oldTable = document.getElementById('transactionsTable');
+                        if (oldTable) {
+                            oldTable.replaceWith(newTable);
+                        } else {
+                            container.appendChild(newTable);
+                        }
+
+                        // Re-attach delegated events if necessary
+                        const transactionsTable = document.getElementById('transactionsTable');
+                        if (transactionsTable) {
+                            transactionsTable.addEventListener('click', handleReviewButtonClick);
+                        }
+
+                        // Reapply filter and search
+                        const searchEl = document.getElementById('searchInput');
+                        if (searchEl) searchEl.value = currentSearch;
+                        filterTransactions(currentFilterSnapshot);
+
+                        // Restart polling for analyzing rows in the refreshed table
+                        startPollingForAnalyzing();
+                    }
+                } catch (err) {
+                    console.warn('Auto-refresh failed:', err);
+                }
+            }
+
+            // Refresh every 5 seconds
+            setInterval(refreshTransactionsTable, 5000);
         });
     </script>
 </body>
