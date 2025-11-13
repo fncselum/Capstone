@@ -58,7 +58,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
         </li>
 
         <!-- Transactions -->
-        <li class="nav-item has-submenu <?= in_array($current_page, ['admin-all-transaction.php', 'admin-return-verification.php']) ? 'active' : '' ?>">
+        <li class="nav-item has-submenu <?= in_array($current_page, ['admin-all-transaction.php', 'admin-return-verification.php', 'admin-archive-transactions.php']) ? 'active' : '' ?>">
             <a href="#" class="submenu-toggle">
                 <i class="fas fa-exchange-alt" style="color: #2196f3;"></i>
                 <span>Transactions</span>
@@ -75,6 +75,12 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     <a href="admin-return-verification.php">
                         <i class="fas fa-check-circle"></i>
                         <span>Return Verification</span>
+                    </a>
+                </li>
+                <li class="<?= $current_page === 'admin-archive-transactions.php' ? 'active' : '' ?>">
+                    <a href="admin-archive-transactions.php">
+                        <i class="fas fa-archive"></i>
+                        <span>Archive Transactions</span>
                     </a>
                 </li>
             </ul>
