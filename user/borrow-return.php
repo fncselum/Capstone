@@ -85,10 +85,15 @@ if (!$conn->connect_error) {
                         <span><strong>Borrowed:</strong> <?= $borrowed_count ?> item(s)</span>
                     </div>
                     <?php endif; ?>
+                    <div class="user-detail clickable" role="button" title="View penalty overview" tabindex="0" onclick="openPenaltyOverview()" onkeypress="if(event.key==='Enter'){openPenaltyOverview()}">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <span><strong>Penalty Points:</strong> <?= (int)$penalty_points ?></span>
+                    </div>
                 </div>
                 <button class="logout-btn" onclick="logout()">
                     <i class="fas fa-sign-out-alt"></i> Logout
                 </button>
+                <div class="user-info-hint-row"><span class="penalty-hint" aria-hidden="true">Tip: Click "Penalty Points" to view your penalties.</span></div>
             </div>
             
             <!-- Action Selection Cards -->
@@ -124,6 +129,7 @@ if (!$conn->connect_error) {
                 </div>
                 <?php endif; ?>
             </div>
+
         </div>
 
         <!-- Footer -->
@@ -242,6 +248,101 @@ if (!$conn->connect_error) {
                 </style>
             `;
             document.body.appendChild(modal);
+        }
+
+        function openPenaltyOverview() {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px);
+                display:flex; align-items:center; justify-content:center; z-index:9999; animation: fadeIn 0.2s ease;`;
+
+            const modal = document.createElement('div');
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.setAttribute('aria-labelledby', 'penaltyTitle');
+            modal.style.cssText = `
+                background:#fff; border-radius:20px; padding:28px 30px; width:92%; max-width:720px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: slideUp 0.2s ease;`;
+
+            modal.innerHTML = `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <i class="fas fa-scale-balanced" style="color:#1e5631; font-size: 20px;"></i>
+                        <h2 id="penaltyTitle" style="margin:0; font-size:1.3rem; color:#333; font-weight:700;">Penalty Overview</h2>
+                    </div>
+                    <button id="closePenaltyModal" style="background:#f5f5f5; color:#666; border:none; padding:8px 12px; border-radius:10px; font-weight:600; cursor:pointer;">Close</button>
+                </div>
+                <p style="margin:4px 0 14px; color:#555; font-size:0.98rem;">Current penalty points: <strong><?= (int)$penalty_points ?></strong></p>
+                <div id="penaltySummaryContent" style="
+                    display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px;">
+                    <div id="tileOutstanding" style="background:#f4fbf6; border:1px solid #e8f5e9; border-radius:14px; padding:14px;">
+                        <div style="font-size:0.85rem; color:#577; margin-bottom:6px;">Outstanding Amount</div>
+                        <div id="sumOutstanding" style="font-size:1.2rem; font-weight:700; color:#1e5631;">₱0.00</div>
+                    </div>
+                    <div style="background:#f4fbf6; border:1px solid #e8f5e9; border-radius:14px; padding:14px;">
+                        <div style="font-size:0.85rem; color:#577; margin-bottom:6px;">Active Penalties</div>
+                        <div id="sumActive" style="font-size:1.2rem; font-weight:700; color:#1e5631;">0</div>
+                    </div>
+                    <div style="background:#f6f9fb; border:1px solid #e9f0f6; border-radius:14px; padding:14px;">
+                        <div style="font-size:0.85rem; color:#577; margin-bottom:6px;">Resolved Cases</div>
+                        <div id="sumResolved" style="font-size:1.2rem; font-weight:700; color:#1e5631;">0</div>
+                    </div>
+                    <div style="background:#f6f9fb; border:1px solid #e9f0f6; border-radius:14px; padding:14px;">
+                        <div style="font-size:0.85rem; color:#577; margin-bottom:6px;">Latest Penalty</div>
+                        <div id="sumLatest" style="font-size:1.1rem; font-weight:700; color:#234;">—</div>
+                    </div>
+                </div>
+                <div id="penaltyNotice" style="
+                    display:none; margin-top:14px; background:#fff4e6; border:1px solid #f3d6b3; color:#8a5a2b;
+                    border-radius:12px; padding:12px; font-size:0.95rem;">
+                    <i class="fas fa-info-circle"></i> Please settle outstanding penalties at the admin desk before borrowing again.
+                </div>
+            `;
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            // Close events
+            modal.querySelector('#closePenaltyModal').addEventListener('click', () => overlay.remove());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+            // Load summary
+            fetch('api/get_penalty_summary.php', { credentials: 'same-origin' })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+                    const s = data.summary || {};
+                    const peso = (v) => `₱${Number(v || 0).toFixed(2)}`;
+                    const fmtDate = (d) => {
+                        if (!d) return '—';
+                        const dt = new Date(d.replace(' ', 'T'));
+                        if (isNaN(dt.getTime())) return '—';
+                        return dt.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' });
+                    };
+                    document.getElementById('sumOutstanding').textContent = peso(s.outstanding_amount);
+                    document.getElementById('sumActive').textContent = s.active_penalties ?? 0;
+                    document.getElementById('sumResolved').textContent = s.resolved_cases ?? 0;
+                    document.getElementById('sumLatest').textContent = fmtDate(s.latest_penalty);
+
+                    const tileOutstanding = document.getElementById('tileOutstanding');
+                    if (tileOutstanding) {
+                        if (!s.has_outstanding || (s.outstanding_amount || 0) <= 0) {
+                            tileOutstanding.style.display = 'none';
+                        } else {
+                            tileOutstanding.style.display = '';
+                        }
+                    }
+
+                    const notice = document.getElementById('penaltyNotice');
+                    if ((s.active_penalties || 0) > 0 || (s.outstanding_amount || 0) > 0) {
+                        notice.style.display = 'block';
+                    } else {
+                        notice.style.display = 'none';
+                    }
+                })
+                .catch(() => {
+                    // Leave defaults if fetch fails
+                });
         }
         
         function confirmLogout() {

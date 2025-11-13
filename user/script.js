@@ -1,9 +1,40 @@
 // ===== Equipment Kiosk - Enhanced RFID Scanner Script =====
 
+// Scanner state references
+let scannerIndicator = null;
+let scannerStatusLabel = null;
+let scannerInstruction = null;
+let scannerResetTimer = null;
+let audioContext = null;
+
+const scannerStates = {
+    ready: {
+        title: 'Ready to Scan',
+        instruction: 'Place your RFID card near the scanner'
+    },
+    scanning: {
+        title: 'Scanning card…',
+        instruction: 'Hold your RFID card steady until you hear the beep.'
+    },
+    success: {
+        title: 'RFID Verified!',
+        instruction: 'Access granted. Redirecting now…'
+    },
+    error: {
+        title: 'Card Not Recognized',
+        instruction: 'Please try again or contact the administrator.'
+    }
+};
+
 // Auto-focus on RFID input
 document.addEventListener('DOMContentLoaded', function() {
     const rfidInput = document.getElementById('rfidInput');
     const statusMessage = document.getElementById('statusMessage');
+    scannerIndicator = document.getElementById('scannerIndicator');
+    scannerStatusLabel = document.getElementById('scannerStatusLabel');
+    scannerInstruction = document.getElementById('scannerInstruction');
+
+    setScannerState('ready');
     
     // Keep focus on RFID input
     if (rfidInput) {
@@ -34,7 +65,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // Show scanning status when typing
         rfidInput.addEventListener('input', function() {
             if (rfidInput.value.length > 0) {
-                showStatus('Scanning...', 'scanning');
+                showStatus('Scanning card…', 'scanning');
+            } else {
+                setScannerState('ready');
+                clearScannerStatus();
             }
         });
     }
@@ -46,7 +80,7 @@ function processRFID(rfid) {
     const rfidInput = document.getElementById('rfidInput');
     
     // Show processing status
-    showStatus('Processing RFID...', 'scanning');
+    showStatus('Processing RFID…', 'scanning');
     
     // Send RFID to server for validation
     fetch('validate_rfid.php', {
@@ -87,22 +121,96 @@ function processRFID(rfid) {
     });
 }
 
-// Show status message
+// Show status message and update scanner state
 function showStatus(message, type) {
     const statusMessage = document.getElementById('statusMessage');
+    setScannerState(type);
+
     if (statusMessage) {
         statusMessage.textContent = message;
         statusMessage.className = 'status-message ' + type;
         statusMessage.style.display = 'block';
-        
-        // Auto-hide after 3 seconds for non-scanning messages
-        if (type !== 'scanning') {
-            setTimeout(() => {
-                if (statusMessage.classList.contains(type)) {
-                    statusMessage.style.display = 'none';
-                }
-            }, 3000);
+        statusMessage.dataset.state = type;
+
+        if (type === 'success' || type === 'error') {
+            playScannerTone(type);
         }
+
+        // Auto-hide after delay for non-scanning messages
+        if (type !== 'scanning') {
+            const hideDelay = type === 'error' ? 4000 : 2500;
+            clearTimeout(scannerResetTimer);
+            scannerResetTimer = setTimeout(() => {
+                if (statusMessage.dataset.state === type) {
+                    clearScannerStatus();
+                    setScannerState('ready');
+                }
+            }, hideDelay);
+        }
+    }
+}
+
+function clearScannerStatus() {
+    const statusMessage = document.getElementById('statusMessage');
+    if (statusMessage) {
+        statusMessage.style.display = 'none';
+        statusMessage.className = 'status-message';
+        statusMessage.textContent = '';
+        statusMessage.dataset.state = '';
+    }
+}
+
+function setScannerState(state) {
+    if (!scannerIndicator || !scannerStatusLabel || !scannerInstruction) {
+        return;
+    }
+
+    const config = scannerStates[state] || scannerStates.ready;
+
+    scannerStatusLabel.textContent = config.title;
+    scannerInstruction.textContent = config.instruction;
+    scannerIndicator.setAttribute('aria-label', config.title);
+
+    scannerIndicator.classList.remove('ready', 'scanning', 'success', 'error');
+    if (state === 'ready' || state === undefined) {
+        scannerIndicator.classList.add('ready');
+    } else {
+        scannerIndicator.classList.add(state);
+    }
+}
+
+function playScannerTone(type) {
+    try {
+        const AudioCtor = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtor) return;
+
+        if (!audioContext) {
+            audioContext = new AudioCtor();
+        }
+
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+
+        const now = audioContext.currentTime;
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        const duration = type === 'error' ? 0.4 : 0.25;
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(type === 'success' ? 880 : 330, now);
+
+        gainNode.gain.setValueAtTime(0.0001, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.2, now + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.start(now);
+        oscillator.stop(now + duration);
+    } catch (err) {
+        console.warn('Scanner tone unavailable:', err);
     }
 }
 

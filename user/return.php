@@ -560,7 +560,7 @@ if ($db_connected) {
 
 			<?php if ($message): ?>
 			<!-- Success Modal -->
-			<div id="successModal" class="notification-modal">
+			<div id="successModal" class="notification-modal" data-cond="<?= htmlspecialchars($condition_after ?? '') ?>" data-qty="<?= isset($quantity_returned) ? (int)$quantity_returned : 0 ?>" data-penalty="<?= isset($penalty) ? (int)$penalty : 0 ?>">
 				<div class="notification-modal-content success-modal">
 					<div class="success-icon-wrapper">
 						<div class="success-checkmark">
@@ -592,6 +592,25 @@ if ($db_connected) {
 					window.location.href = 'borrow-return.php';
 				}
 			}, 1000);
+			</script>
+			<script>
+			(function(){
+				const modal = document.getElementById('successModal');
+				const msgEl = modal.querySelector('.notification-message');
+				if (!msgEl) return;
+				const html = msgEl.innerHTML;
+				const txnMatch = html.match(/Transaction ID:\s*#(\d+)/i);
+				const cond = modal.dataset.cond || '';
+				const qty = parseInt(modal.dataset.qty || '0', 10) || 0;
+				const pen = parseInt(modal.dataset.penalty || '0', 10) || 0;
+				let extra = '<div class="success-summary">';
+				if (cond) extra += `<div class="sum-row"><span>Condition Status</span><strong>${cond}</strong></div>`;
+				if (qty) extra += `<div class=\"sum-row\"><span>Borrowed Quantity</span><strong>${qty}</strong></div>`;
+				extra += `<div class=\"sum-row\"><span>Penalties Applied</span><strong>${pen > 0 ? pen + ' points' : 'None'}</strong></div>`;
+				if (txnMatch) extra += `<div class=\"sum-row\"><span>Transaction ID</span><strong>#${txnMatch[1]}</strong></div>`;
+				extra += '</div><p class="return-mini-note">Please keep your transaction ID for any follow-up.</p>';
+				msgEl.insertAdjacentHTML('afterend', extra);
+			})();
 			</script>
 		<?php elseif ($error): ?>
 			<!-- Error Modal -->
@@ -700,6 +719,7 @@ if ($db_connected) {
 				</div>
 				
 				<div class="return-modal-right">
+				<p class="return-steps"><span class="step">Steps:</span> Scan tag → Place item for photo → Countdown → Review image</p>
 					<div class="return-info">
 						<h3 id="modalEquipmentName"></h3>
 						<p id="modalStatusInfo"></p>
@@ -724,6 +744,7 @@ if ($db_connected) {
 							<i class="fas fa-check"></i> Confirm Return
 						</button>
 					</div>
+					<p class="return-mini-note">Ensure the photo is clear and keep your transaction ID.</p>
 				</div>
 			</form>
 		</div>
@@ -893,6 +914,8 @@ async function startCamera() {
 		mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
 		videoEl.srcObject = mediaStream;
 		await videoEl.play().catch(() => {});
+		// Mirror preview horizontally for a more natural camera view
+		videoEl.style.transform = 'scaleX(-1)';
 		statusEl.textContent = 'Camera ready. Taking photo in 5 seconds…';
 		startCountdown();
 	} catch (error) {
@@ -913,7 +936,13 @@ function capturePhoto() {
 	canvasEl.width = videoEl.videoWidth;
 	canvasEl.height = videoEl.videoHeight;
 	const context = canvasEl.getContext('2d');
+	// Mirror the drawn image so the saved photo matches the mirrored preview
+	context.save();
+	context.translate(canvasEl.width, 0);
+	context.scale(-1, 1);
 	context.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+	context.restore();
+
 	const dataUrl = canvasEl.toDataURL('image/jpeg', 0.9);
 	photoInput.value = dataUrl;
 	canvasEl.style.display = 'block';

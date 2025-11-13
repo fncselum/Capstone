@@ -40,7 +40,7 @@ if ($db_connected) {
 		if ($requested_qty <= 0) {
 			$requested_qty = 1;
 		}
-		
+
 		if ($equipment_id > 0 && !empty($due_date)) {
 			$conn->begin_transaction();
 			try {
@@ -295,6 +295,26 @@ if ($db_connected) {
 			<script>
 			// Show modal with animation
 			document.getElementById('successModal').style.display = 'flex';
+			// Build structured summary from message when possible
+			(function(){
+				const msgEl = document.querySelector('#successModal .notification-message');
+				if (!msgEl) return;
+				const html = msgEl.innerHTML;
+				const txnMatch = html.match(/Transaction ID:\s*#(\d+)/i);
+				const dueMatch = html.match(/Please return by:\s*([^<]+)/i);
+				const qtyMatch = html.match(/Borrowed:\s*(\d+)\s*item/i);
+				const remainMatch = html.match(/(remaining|Low stock):\s*([^<]+)/i);
+				let extra = '';
+				if (txnMatch || dueMatch || qtyMatch || remainMatch) {
+					extra = '<div class="success-summary">' +
+						(txnMatch ? `<div class="sum-row"><span>Transaction ID</span><strong>#${txnMatch[1]}</strong></div>` : '') +
+						(dueMatch ? `<div class="sum-row"><span>Expected Return</span><strong>${dueMatch[1]}</strong></div>` : '') +
+						(qtyMatch ? `<div class="sum-row"><span>Borrowed Quantity</span><strong>${qtyMatch[1]}</strong></div>` : '') +
+						(remainMatch ? `<div class="sum-row"><span>Status</span><strong>${remainMatch[2]}</strong></div>` : '') +
+					'</div>';
+					msgEl.insertAdjacentHTML('afterend', extra);
+				}
+			})();
 			
 			// Countdown and redirect
 			let countdown = 10;
@@ -465,14 +485,25 @@ if ($db_connected) {
 							<small>Select when you plan to return this equipment</small>
 						</div>
 						
-						<div class="modal-actions">
-							<button type="button" class="btn-cancel" onclick="closeBorrowModal()">
-								<i class="fas fa-times"></i> Cancel
-							</button>
-							<button type="submit" class="btn-confirm">
-								<i class="fas fa-check"></i> Confirm Borrow
-							</button>
-						</div>
+						<!-- Acknowledgment above buttons -->
+                        <div class="acknowledge-row" style="margin-top:8px; margin-bottom:10px;">
+                            <label style="display:flex; align-items:center; gap:8px;">
+                                <input type="checkbox" id="acknowledgeTerms"> 
+                                <span>I agree to the <a href="#" onclick="openBorrowTerms(event)">Terms and Conditions</a>.</span>
+                            </label>
+                        </div>
+
+                        <div class="modal-actions">
+                            <button type="button" class="btn-cancel" onclick="closeBorrowModal()">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
+                            <button type="submit" class="btn-confirm" id="confirmBorrowBtn" disabled>
+                                <i class="fas fa-check"></i> Confirm Borrow
+                            </button>
+                        </div>
+
+                        <!-- Small note under buttons -->
+                        <p class="borrow-note">Return equipment on time to avoid penalty charges.</p>
 					</form>
 				</div>
 			</div>
@@ -498,6 +529,15 @@ if ($db_connected) {
 		hiddenInput.value = newValue;
 		minusBtn.disabled = newValue <= 1;
 		plusBtn.disabled = newValue >= safeMax;
+		const ack = document.getElementById('acknowledgeTerms');
+		const confirmBtn = document.getElementById('confirmBorrowBtn');
+		if (ack) { ack.checked = false; }
+		if (confirmBtn) { confirmBtn.disabled = true; }
+		if (ack && confirmBtn) {
+			ack.onchange = function(){
+				confirmBtn.disabled = !ack.checked;
+			};
+		}
 	}
 
 	function applySizeUI(sizeCategory) {
@@ -524,7 +564,9 @@ if ($db_connected) {
 		updateQuantityDisplay(1);
 		currentItemSize = sizeCategory || 'Medium';
 		applySizeUI(currentItemSize);
-		
+
+
+
 		const imageElement = document.getElementById('modalEquipmentImage');
 		const iconElement = document.getElementById('modalEquipmentIcon');
 		
@@ -609,6 +651,33 @@ if ($db_connected) {
 		if (event.target.id === 'borrowModal') {
 			closeBorrowModal();
 		}
+	}
+
+	// Terms and Conditions lightweight modal
+	function openBorrowTerms(e){
+		if(e) e.preventDefault();
+		const overlay = document.createElement('div');
+		overlay.className = 'modal-overlay';
+		overlay.style.display = 'flex';
+		const box = document.createElement('div');
+		box.className = 'modal-box';
+		box.style.maxWidth = '640px';
+		box.innerHTML = `
+			<div class="modal-header">
+				<h2>Terms and Conditions</h2>
+				<button class="modal-close" onclick="this.closest('.modal-overlay').remove()"><i class="fas fa-times"></i></button>
+			</div>
+			<div style="padding: 20px; max-height: 70vh; overflow-y:auto;">
+				<ul style="margin:0 0 0 18px; color:#555; line-height:1.6;">
+					<li>Return equipment on or before the selected due date to avoid penalties.</li>
+					<li>Handle equipment responsibly; report any damages or issues immediately.</li>
+					<li>Large items may require admin approval prior to release.</li>
+					<li>Lost RFID cards must be reported to the administrator.</li>
+				</ul>
+			</div>`;
+		overlay.appendChild(box);
+		document.body.appendChild(overlay);
+		overlay.addEventListener('click', function(ev){ if(ev.target===overlay) overlay.remove(); });
 	}
 
 	// Category filter

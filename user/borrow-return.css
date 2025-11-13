@@ -137,6 +137,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap; /* allow hint to wrap to new line */
     margin-bottom: 20px;
     width: 100%;
     max-width: 900px;
@@ -158,6 +159,28 @@
     font-size: 1rem;
     color: #333;
     font-weight: 500;
+}
+
+/* Clickable user detail (Penalty Points) */
+.user-detail.clickable { cursor: pointer; }
+.user-detail.clickable:hover span { text-decoration: underline; }
+.user-detail.clickable:focus { outline: 2px solid #1e5631; outline-offset: 2px; border-radius: 6px; }
+
+/* Mini subtitle under user info bar */
+.penalty-hint {
+  margin: 0;
+  font-size: 0.8rem; /* slightly smaller */
+  color: #6b6b6b;
+  font-style: italic;
+  line-height: 1.2; /* compact */
+}
+
+/* Full-width row for hint inside the bar */
+.user-info-hint-row {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: flex-start; /* left align */
+  margin-top: 4px; /* tighter spacing */
 }
 
 .logout-btn {

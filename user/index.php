@@ -85,15 +85,22 @@ if (!$conn->connect_error) {
                             <i class="fas fa-id-card scanner-icon"></i>
                             <div class="pulse-ring"></div>
                         </div>
-                        
-                        <h2 class="scanner-title">Ready to Scan</h2>
-                        <p class="scanner-instruction">Place your RFID card near the scanner</p>
-                        
+
+                        <div class="scanner-status-wrap">
+                            <span class="status-indicator ready" id="scannerIndicator" aria-hidden="true"></span>
+                            <div class="status-text">
+                                <h2 class="scanner-title" id="scannerStatusLabel">Ready to Scan</h2>
+                                <p class="scanner-instruction" id="scannerInstruction">Place your RFID card near the scanner</p>
+                            </div>
+                        </div>
+
                         <!-- Hidden RFID Input (Auto-scan only) -->
                         <input type="text" id="rfidInput" class="rfid-input" autocomplete="off" autofocus>
-                        
+
                         <!-- Status Message -->
-                        <div id="statusMessage" class="status-message"></div>
+                        <div id="statusMessage" class="status-message" role="status" aria-live="polite"></div>
+
+                        <p class="scanner-help">If your card isn't recognized, please contact the administrator.</p>
                     </div>
                 <?php endif; ?>
                 

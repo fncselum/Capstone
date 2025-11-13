@@ -230,6 +230,54 @@ body {
 }
 
 /* Scanner Title */
+.scanner-status-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.status-indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #1e5631;
+    box-shadow: 0 0 12px rgba(30, 86, 49, 0.4);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.status-indicator.scanning {
+    background: #ff9800;
+    box-shadow: 0 0 12px rgba(255, 152, 0, 0.5);
+}
+
+.status-indicator.success {
+    background: #4caf50;
+    box-shadow: 0 0 12px rgba(76, 175, 80, 0.5);
+}
+
+.status-indicator.error {
+    background: #f44336;
+    box-shadow: 0 0 12px rgba(244, 67, 54, 0.5);
+}
+
+.status-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    text-align: center;
+}
+
+.status-text .scanner-title {
+    margin: 0;
+}
+
+.status-text .scanner-instruction {
+    margin: 0;
+}
+
 .scanner-title {
     font-size: 2.4rem;
     color: #1e5631;
@@ -248,6 +296,12 @@ body {
     position: absolute;
     opacity: 0;
     pointer-events: none;
+}
+
+.scanner-help {
+    margin-top: 20px;
+    color: #7a7a7a;
+    font-size: 0.95rem;
 }
 
 /* Manual Input Button */

@@ -568,7 +568,7 @@
 ---
 
 ### **Use Case No. 022 – Image Comparison & Damage Detection**
-**Description:** System compares borrow and return photos to detect damage
+**Description:** e
 
 **Functional Requirements:**
 - Side-by-side image comparison
