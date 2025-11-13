@@ -14,6 +14,22 @@ class PenaltySystem
     }
 
     /**
+     * Check if a penalty record already exists for a given transaction.
+     */
+    public function penaltyExistsForTransaction(int $transactionId): bool
+    {
+        $sql = "SELECT 1 FROM penalties WHERE transaction_id = ? LIMIT 1";
+        $stmt = $this->conn->prepare($sql);
+        if (!$stmt) return false;
+        $stmt->bind_param('i', $transactionId);
+        $stmt->execute();
+        $stmt->store_result();
+        $exists = $stmt->num_rows > 0;
+        $stmt->close();
+        return $exists;
+    }
+
+    /**
      * Create a penalty record following IMC policy (no payment processing)
      */
     public function createPenalty(array $data): bool
@@ -47,6 +63,12 @@ class PenaltySystem
         }
 
         if ($transactionId === null || $penaltyType === '') {
+            return false;
+        }
+
+        // Prevent duplicate penalties for the same transaction
+        if ($this->penaltyExistsForTransaction($transactionId)) {
+            error_log('PenaltySystem::createPenalty blocked: penalty already exists for transaction ' . $transactionId);
             return false;
         }
 
@@ -114,6 +136,11 @@ class PenaltySystem
 
         $penaltyId = $stmt->insert_id;
         $stmt->close();
+
+        // Log initial status history as 'Pending'
+        if ($penaltyId) {
+            $this->logPenaltyStatusChange($penaltyId, null, 'Pending', $notes !== '' ? $notes : 'Penalty created', $adminId);
+        }
 
         if ($penaltyId && ($detectedIssues !== '' || $similarityScore !== null || $comparisonSummary !== '' || $adminAssessment !== '')) {
             $assessment = $this->conn->prepare(
@@ -265,32 +292,35 @@ class PenaltySystem
         $stmt->close();
 
         if ($success) {
-            $history = $this->conn->prepare(
-                "INSERT INTO penalty_status_history (
-                        penalty_id,
-                        old_status,
-                        new_status,
-                        notes,
-                        changed_by
-                    ) VALUES (?, ?, ?, ?, ?)"
-            );
-
-            if ($history) {
-                $changedBy = $_SESSION['admin_id'] ?? $previousResolver;
-                $history->bind_param(
-                    'isssi',
-                    $penaltyId,
-                    $oldStatus,
-                    $status,
-                    $notes !== '' ? $notes : null,
-                    $changedBy
-                );
-                $history->execute();
-                $history->close();
-            }
+            $changedBy = $_SESSION['admin_id'] ?? $previousResolver;
+            $this->logPenaltyStatusChange($penaltyId, $oldStatus, $status, $notes !== '' ? $notes : null, $changedBy);
         }
 
         return $success;
+    }
+
+    /**
+     * Write a row to penalty_status_history. created_at should be defaulted by DB.
+     */
+    private function logPenaltyStatusChange(int $penaltyId, ?string $oldStatus, string $newStatus, ?string $notes, $changedBy): void
+    {
+        $sql = "INSERT INTO penalty_status_history (
+                    penalty_id,
+                    old_status,
+                    new_status,
+                    notes,
+                    changed_by
+                ) VALUES (?, ?, ?, ?, ?)";
+        $stmt = $this->conn->prepare($sql);
+        if (!$stmt) {
+            error_log('PenaltySystem::logPenaltyStatusChange prepare failed: ' . $this->conn->error);
+            return;
+        }
+        $stmt->bind_param('isssi', $penaltyId, $oldStatus, $newStatus, $notes, $changedBy);
+        if (!$stmt->execute()) {
+            error_log('PenaltySystem::logPenaltyStatusChange execute failed: ' . $stmt->error);
+        }
+        $stmt->close();
     }
 
     public function autoCalculateOverduePenalties(): int

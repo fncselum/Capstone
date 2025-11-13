@@ -267,7 +267,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $error_message = "Please complete all required fields for creating a penalty.";
         } else {
 
-            if ($payload['penalty_type'] === 'Late Return' && $payload['days_overdue'] > 0) {
+            // Block duplicate penalties for the same transaction
+            if (!empty($payload['transaction_id']) && $penaltySystem->penaltyExistsForTransaction((int)$payload['transaction_id'])) {
+                $error_message = "A penalty already exists for this transaction. Only one penalty can be issued per transaction.";
+            } elseif ($payload['penalty_type'] === 'Late Return' && $payload['days_overdue'] > 0) {
                 $dailyRate = $payload['daily_rate'] ?: PenaltySystem::DEFAULT_DAILY_RATE;
                 $amount = $dailyRate * $payload['days_overdue'];
                 $payload['penalty_amount'] = $amount;
@@ -275,12 +278,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $payload['amount_note'] = sprintf('%d day(s) × ₱%0.2f per day', $payload['days_overdue'], $dailyRate);
             }
 
-            if ($penaltySystem->createPenalty($payload)) {
+            if (empty($error_message) && $penaltySystem->createPenalty($payload)) {
                 $_SESSION['success_message'] = "Penalty record created successfully.";
                 header('Location: admin-penalty-management.php');
                 exit;
             } else {
-                $error_message = "Failed to create penalty. Please verify the details.";
+                if (empty($error_message)) {
+                    $error_message = "Failed to create penalty. Please verify the details.";
+                }
             }
         }
     }
@@ -387,10 +392,47 @@ $stats = $penaltySystem->getPenaltyStatistics();
             <header class="top-header">
                 <h1 class="page-title">Penalty Management</h1>
                 <div class="header-actions">
-                    <button class="btn btn-success" onclick="openManualPenaltyModal()">
+                    <button type="button" id="addPenaltyBtn" class="btn btn-success" onclick="openManualPenaltyModal(event)">
                         <i class="fas fa-plus"></i> Add Penalty
                     </button>
                 </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        function norm(s){ return (s||'').toString().toLowerCase(); }
+        const statusEl = document.getElementById('statusFilter');
+        const typeEl = document.getElementById('typeFilter');
+        const searchEl = document.getElementById('searchInput');
+
+        function applyFilter(){
+            const st = norm(statusEl && statusEl.value);
+            const tp = norm(typeEl && typeEl.value);
+            const q = norm(searchEl && searchEl.value).trim();
+            const rows = document.querySelectorAll('#penaltiesTable tbody .penalty-row');
+            let shown = 0;
+            rows.forEach(row => {
+                const rStatus = row.getAttribute('data-status');
+                const rType = row.getAttribute('data-type');
+                const text = norm(row.innerText);
+                const okStatus = !st || st === 'all' || rStatus === st;
+                const okType = !tp || tp === 'all' || rType === tp;
+                const okText = !q || text.indexOf(q) !== -1;
+                const show = okStatus && okType && okText;
+                row.style.display = show ? '' : 'none';
+                if (show) shown++;
+            });
+            const noData = document.querySelector('.no-data');
+            if (noData) noData.style.display = shown === 0 ? '' : 'none';
+        }
+
+        if (statusEl) statusEl.addEventListener('change', applyFilter);
+        if (typeEl) typeEl.addEventListener('change', applyFilter);
+        if (searchEl) searchEl.addEventListener('input', applyFilter);
+
+        // Initial filter on load to reflect current values
+        applyFilter();
+    });
+    </script>
             </header>
 
             <!-- Messages -->
@@ -663,10 +705,10 @@ $stats = $penaltySystem->getPenaltyStatistics();
                     <h2><i class="fas fa-filter"></i> Filter Penalties</h2>
                 </div>
 
-                <form method="GET" class="filter-form">
+                <form method="GET" class="filter-form" id="penaltyFilterForm" onsubmit="return false;">
                     <div class="filter-group">
                         <label for="status">Status</label>
-                        <select name="status" id="status">
+                        <select name="status" id="statusFilter">
                             <option value="all" <?= $status_filter === 'all' ? 'selected' : '' ?>>All Statuses</option>
                             <option value="Pending" <?= $status_filter === 'Pending' ? 'selected' : '' ?>>Pending</option>
                             <option value="Under Review" <?= $status_filter === 'Under Review' ? 'selected' : '' ?>>Under Review</option>
@@ -681,7 +723,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
                     <div class="filter-group">
                         <label for="type">Penalty Type</label>
-                        <select name="type" id="type">
+                        <select name="type" id="typeFilter">
                             <option value="all" <?= $type_filter === 'all' ? 'selected' : '' ?>>All Types</option>
                             <?php foreach ($penaltyTypes as $typeOption): ?>
                                 <option value="<?= htmlspecialchars($typeOption) ?>" <?= $type_filter === $typeOption ? 'selected' : '' ?>>
@@ -693,16 +735,8 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
                     <div class="filter-group search">
                         <label for="search">Search</label>
-                        <input type="text" id="search" name="search" value="<?= htmlspecialchars($search_query) ?>" placeholder="Student ID, RFID, transaction, equipment">
+                        <input type="text" id="searchInput" name="search" value="<?= htmlspecialchars($search_query) ?>" placeholder="Student ID, RFID, transaction, equipment" autocomplete="off">
                     </div>
-
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-search"></i> Apply
-                    </button>
-
-                    <a href="admin-penalty-management.php" class="btn btn-secondary">
-                        <i class="fas fa-times"></i> Clear
-                    </a>
                 </form>
             </section>
 
@@ -713,8 +747,8 @@ $stats = $penaltySystem->getPenaltyStatistics();
                 </div>
 
                 <?php if ($penalties_result && $penalties_result->num_rows > 0): ?>
-                    <div class="table-container">
-                        <table class="penalties-table simplified">
+                    <div class="table-container" id="penaltiesTableContainer">
+                        <table class="penalties-table simplified" id="penaltiesTable">
                             <thead>
                                 <tr>
                                     <th>ID</th>
@@ -730,7 +764,7 @@ $stats = $penaltySystem->getPenaltyStatistics();
                             </thead>
                             <tbody>
                                 <?php while ($penalty = $penalties_result->fetch_assoc()): ?>
-                                    <tr>
+                                    <tr class="penalty-row" data-status="<?= htmlspecialchars(strtolower($penalty['status'])) ?>" data-type="<?= htmlspecialchars(strtolower($penalty['penalty_type'])) ?>">
                                         <td>#<?= $penalty['id'] ?></td>
                                         <td><?= htmlspecialchars($penalty['user_id'] ?? 'N/A') ?></td>
                                         <td><?= htmlspecialchars($penalty['equipment_name'] ?? 'N/A') ?></td>
@@ -757,16 +791,12 @@ $stats = $penaltySystem->getPenaltyStatistics();
                                         <td><?= !empty($penalty['date_imposed']) ? date('M d, Y', strtotime($penalty['date_imposed'])) : 'N/A' ?></td>
                                         <td>
                                             <div class="action-buttons">
-                                                <button class="btn btn-small btn-info" onclick="viewPenaltyDetail(<?= $penalty['id'] ?>)" title="View Details">
+                                                <button type="button" class="btn btn-small btn-info" onclick="viewPenaltyDetail(<?= $penalty['id'] ?>)" title="View Details">
                                                     <i class="fas fa-eye"></i>
                                                 </button>
                                                 
                                                 <?php if (in_array($penalty['status'], ['Pending', 'Under Review', 'Awaiting Student Action', 'Repair in Progress', 'Awaiting Inspection'], true)): ?>
-                                                    <button class="btn btn-small btn-primary" onclick="updatePenaltyStatusModal(<?= $penalty['id'] ?>)" title="Update Status">
-                                                        <i class="fas fa-edit"></i> Update
-                                                    </button>
-                                                    
-                                                    <button class="btn btn-small btn-danger" onclick="dismissPenaltyModal(<?= $penalty['id'] ?>)" title="Dismiss Penalty">
+                                                    <button type="button" class="btn btn-small btn-danger" onclick="dismissPenaltyModal(event, <?= $penalty['id'] ?>)" title="Dismiss Penalty">
                                                         <i class="fas fa-times-circle"></i> Dismiss
                                                     </button>
                                                 <?php elseif ($penalty['status'] === 'Appealed'): ?>
@@ -1233,6 +1263,21 @@ $stats = $penaltySystem->getPenaltyStatistics();
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #dee2e6;
+        }
+
+        /* Compact Actions column */
+        .penalties-table th:last-child,
+        .penalties-table td:last-child {
+            width: 150px;
+            max-width: 150px;
+            white-space: nowrap;
+            padding-right: 8px;
+        }
+
+        /* Tighter spacing for action buttons inside table */
+        .penalties-table .action-buttons {
+            gap: 6px;
+            justify-content: flex-start;
         }
 
         .penalties-table th {
@@ -2489,14 +2534,41 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         function updatePenaltyStatusModal(penaltyId) {
             closePenaltyDetailModal();
-            document.getElementById('status_penalty_id').value = penaltyId;
-            document.getElementById('statusModal').style.display = 'block';
+            const statusModal = document.getElementById('statusModal');
+            const dismissModal = document.getElementById('dismissPenaltyModal');
+            const appealModal = document.getElementById('processAppealModal');
+            const createModal = document.getElementById('createPenaltyModal');
+            if (dismissModal) dismissModal.style.display = 'none';
+            if (appealModal) appealModal.style.display = 'none';
+            if (createModal) createModal.style.display = 'none';
+            if (statusModal) {
+                document.getElementById('status_penalty_id').value = penaltyId;
+                statusModal.style.display = 'block';
+            }
         }
 
         // Dismiss Penalty Modal
-        function dismissPenaltyModal(penaltyId) {
-            document.getElementById('dismiss_penalty_id').value = penaltyId;
-            document.getElementById('dismissPenaltyModal').style.display = 'block';
+        function dismissPenaltyModal(e, penaltyId) {
+            if (e && typeof e.stopPropagation === 'function') { e.stopPropagation(); }
+            const statusModal = document.getElementById('statusModal');
+            const dismissModal = document.getElementById('dismissPenaltyModal');
+            const appealModal = document.getElementById('processAppealModal');
+            const createModal = document.getElementById('createPenaltyModal');
+            if (statusModal) statusModal.style.display = 'none';
+            if (appealModal) appealModal.style.display = 'none';
+            if (createModal) createModal.style.display = 'none';
+            if (dismissModal) {
+                const idField = document.getElementById('dismiss_penalty_id');
+                if (idField) idField.value = penaltyId;
+                try { if (dismissModal.parentElement !== document.body) document.body.appendChild(dismissModal); } catch (_) {}
+                dismissModal.style.display = 'block';
+                dismissModal.style.visibility = 'visible';
+                dismissModal.style.opacity = '1';
+                dismissModal.style.pointerEvents = 'auto';
+                dismissModal.style.zIndex = '5000';
+                try { void dismissModal.offsetHeight; } catch (_) {}
+                setTimeout(() => { if (dismissModal) dismissModal.style.display = 'block'; }, 0);
+            }
         }
 
         function closeDismissPenaltyModal() {
@@ -2505,8 +2577,17 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
         // Process Appeal Modal
         function processAppealModal(penaltyId) {
-            document.getElementById('process_appeal_penalty_id').value = penaltyId;
-            document.getElementById('processAppealModal').style.display = 'block';
+            const statusModal = document.getElementById('statusModal');
+            const dismissModal = document.getElementById('dismissPenaltyModal');
+            const appealModal = document.getElementById('processAppealModal');
+            const createModal = document.getElementById('createPenaltyModal');
+            if (statusModal) statusModal.style.display = 'none';
+            if (dismissModal) dismissModal.style.display = 'none';
+            if (createModal) createModal.style.display = 'none';
+            if (appealModal) {
+                document.getElementById('process_appeal_penalty_id').value = penaltyId;
+                appealModal.style.display = 'block';
+            }
         }
 
         function closeProcessAppealModal() {
@@ -2521,16 +2602,45 @@ $stats = $penaltySystem->getPenaltyStatistics();
         });
 
         // Manual Penalty Modal Functions
-        function openManualPenaltyModal() {
+        window.openManualPenaltyModal = function(e) {
+            if (e && typeof e.stopPropagation === 'function') { e.stopPropagation(); }
             const modal = document.getElementById('createPenaltyModal');
-            if (modal) {
-                // Reset form
-                document.getElementById('createPenaltyForm').reset();
-                document.getElementById('preview_amount').textContent = '0.00';
-                document.getElementById('late_return_fields').style.display = 'none';
-                document.getElementById('damage_severity_group').style.display = 'none';
-                modal.style.display = 'block';
+            if (!modal) {
+                if (window.Toast) Toast.error('Create Penalty modal not found in DOM.');
+                return;
             }
+
+            // Close other modals to avoid conflicts
+            const statusModal = document.getElementById('statusModal');
+            const dismissModal = document.getElementById('dismissPenaltyModal');
+            const appealModal = document.getElementById('processAppealModal');
+            if (statusModal) statusModal.style.display = 'none';
+            if (dismissModal) dismissModal.style.display = 'none';
+            if (appealModal) appealModal.style.display = 'none';
+
+            const form = document.getElementById('createPenaltyForm');
+            if (form && typeof form.reset === 'function') {
+                try { form.reset(); } catch (_) {}
+            }
+            const preview = document.getElementById('preview_amount');
+            if (preview) { preview.textContent = '0.00'; }
+            const lateFields = document.getElementById('late_return_fields');
+            if (lateFields) { lateFields.style.display = 'none'; }
+            const dmgGroup = document.getElementById('damage_severity_group');
+            if (dmgGroup) { dmgGroup.style.display = 'none'; }
+
+            // Ensure modal is at top-level to avoid any stacking context issues
+            try { if (modal.parentElement !== document.body) document.body.appendChild(modal); } catch (_) {}
+            modal.style.display = 'block';
+            modal.style.visibility = 'visible';
+            modal.style.opacity = '1';
+            modal.style.pointerEvents = 'auto';
+            modal.style.zIndex = '5000';
+            // Force reflow to apply
+            try { void modal.offsetHeight; } catch (_) {}
+            // Reinforce after event loop in case any global click handler toggles it
+            setTimeout(() => { if (modal) modal.style.display = 'block'; }, 0);
+            try { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (_) {}
         }
 
         function closeManualPenaltyModal() {

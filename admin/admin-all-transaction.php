@@ -73,6 +73,10 @@ if ($users_table_exists) {
          LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag
          LEFT JOIN users u ON t.user_id = u.id
          LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
+         WHERE NOT (
+             t.return_verification_status = 'Verified'
+             OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id)
+         )
          ORDER BY t.transaction_date DESC";
 } else {
     // Fallback if users table doesn't exist - use rfid_id from transactions
@@ -90,6 +94,10 @@ if ($users_table_exists) {
          FROM transactions t
          LEFT JOIN equipment e ON t.equipment_id = e.rfid_tag
          LEFT JOIN inventory inv ON e.rfid_tag = inv.equipment_id
+         WHERE NOT (
+             t.return_verification_status = 'Verified'
+             OR EXISTS (SELECT 1 FROM penalties p WHERE p.transaction_id = t.id)
+         )
          ORDER BY t.transaction_date DESC";
 }
 

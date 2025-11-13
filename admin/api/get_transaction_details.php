@@ -55,6 +55,25 @@ $result = $stmt->get_result();
 
 if ($result->num_rows > 0) {
     $transaction = $result->fetch_assoc();
+
+    // Check if a penalty already exists for this transaction
+    $p = $conn->prepare("SELECT 1 FROM penalties WHERE transaction_id = ? LIMIT 1");
+    if ($p) {
+        $p->bind_param('i', $transaction['id']);
+        $p->execute();
+        $p->store_result();
+        $exists = $p->num_rows > 0;
+        $p->close();
+        if ($exists) {
+            echo json_encode([
+                'success' => false,
+                'already_penalized' => true,
+                'message' => 'A penalty already exists for this transaction. Only one penalty can be issued per transaction.'
+            ]);
+            exit;
+        }
+    }
+
     echo json_encode([
         'success' => true,
         'transaction' => [
