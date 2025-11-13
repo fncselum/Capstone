@@ -185,13 +185,16 @@ POST: action=process_appeal
 ## UI Enhancements
 
 ### Statistics Dashboard
-The Penalty Snapshot section displays 6 key metrics:
-1. **Pending** (Yellow) - Penalties awaiting review
-2. **Under Review** (Cyan) - Penalties being investigated
-3. **Damage Cases** (Red) - Total damage-related penalties
-4. **Late Returns** (Orange) - Total late return penalties
-5. **Resolved** (Green) - Completed/closed penalties
-6. **Appealed** (Gray) - Penalties under appeal
+The Penalty Snapshot section displays 9 key metrics:
+1. **Pending** (Yellow) - Penalties just issued and awaiting initial triage
+2. **Under Review** (Cyan) - Admins are gathering details or validating the case
+3. **Awaiting Student Action** (Orange) - Student has been notified and must repair/replace
+4. **Repair in Progress** (Teal) - Student or lab is actively repairing equipment
+5. **Awaiting Inspection** (Purple) - Repairs complete; awaiting admin inspection sign-off
+6. **Damage Cases** (Red) - Total penalties categorized as damage
+7. **Late Returns** (Orange) - Total penalties for overdue returns
+8. **Resolved** (Green) - Completed/closed penalties (includes waived/dismissed)
+9. **Appealed** (Gray) - Penalties currently under appeal review
 
 ### Table Columns
 1. **ID** - Penalty identifier (#XXX)
@@ -204,6 +207,12 @@ The Penalty Snapshot section displays 6 key metrics:
 8. **Date Imposed** - Formatted date
 9. **Actions** - Dynamic action buttons
 
+### Issue Penalty Workflow
+1. **Capture Damage Evidence** via kiosk comparison, similarity score, and admin assessment
+2. **Auto-suggested Guideline** based on severity score or fallback rules
+3. **Admin reviews and confirms** the suggested guideline (with ability to override)
+4. **Penalty record created** – linked to guideline, stored in `penalties` table
+
 ### Button Colors & Labels
 - **Info (Blue)** - 👁️ View Details
 - **Primary (Blue)** - ✏️ Update (Update Status)
@@ -211,24 +220,15 @@ The Penalty Snapshot section displays 6 key metrics:
 - **Danger (Red)** - ✖️ Dismiss (Dismiss Penalty)
 - **Secondary (Gray)** - ⚖️ Process Appeal
 
-## Success Messages
-
-All actions show success messages and redirect to prevent form resubmission:
-- "Penalty status updated successfully."
-- "Penalty marked as resolved."
-- "Penalty cancelled successfully." (dismissed)
-- "Appeal processed successfully."
-
 ## Best Practices
 
 ### For Admins
 
-1. **Issue Penalty**: Create penalty record when violation occurs
-2. **Update Status**: Track penalty progress through workflow
-3. **Quick Resolve**: Use for straightforward resolutions (student complied)
-4. **Dismiss Penalty**: Cancel penalties issued in error or special cases
-5. **Process Appeal**: Review appeals fairly and document decisions
-6. **Document Everything**: Always add notes explaining actions taken
+1. **Issue Penalty**: Create penalty record when violation occurs (auto-selects suggested guideline when available; badge shows if overridden)
+2. **Update Status**: Track penalty progress through workflow (Pending → Under Review → Awaiting Student Action → Repair in Progress → Awaiting Inspection → Resolved)
+3. **Dismiss Penalty**: Cancel penalties issued in error or special cases
+4. **Process Appeal**: Review appeals fairly and document decisions
+5. **Document Everything**: Always add notes explaining actions taken
 
 ### Documentation Standards
 - Always add notes explaining status changes
