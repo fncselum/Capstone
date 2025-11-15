@@ -950,8 +950,9 @@ if ($db_connected) {
 				mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
 				videoEl.srcObject = mediaStream;
 				await videoEl.play().catch(() => {});
-				// Mirror preview horizontally for a more natural camera view
-				videoEl.style.transform = 'scaleX(-1)';
+				// Mirror preview horizontally and flip vertically to correct upside-down cameras
+                videoEl.style.transform = 'scaleX(-1) scaleY(-1)';
+                videoEl.style.transformOrigin = 'center center';
 				statusEl.textContent = 'Camera ready. Taking photo in 5 seconds…';
 				startCountdown();
 			} catch (error) {
@@ -972,12 +973,12 @@ if ($db_connected) {
 			canvasEl.width = videoEl.videoWidth;
 			canvasEl.height = videoEl.videoHeight;
 			const context = canvasEl.getContext('2d');
-			// Mirror the drawn image so the saved photo matches the mirrored preview
-			context.save();
-			context.translate(canvasEl.width, 0);
-			context.scale(-1, 1);
-			context.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
-			context.restore();
+            // Apply the same transforms as the preview: horizontal mirror + vertical flip
+            context.save();
+            context.translate(canvasEl.width, canvasEl.height);
+            context.scale(-1, -1);
+            context.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+            context.restore();
 
 			const dataUrl = canvasEl.toDataURL('image/jpeg', 0.9);
 			photoInput.value = dataUrl;

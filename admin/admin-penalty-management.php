@@ -2910,9 +2910,9 @@ $stats = $penaltySystem->getPenaltyStatistics();
 
     <script>
         function openQuickPenalty() {
-            if (typeof openManualPenaltyModal === 'function') {
-                openManualPenaltyModal();
-            }
+            // Redirect to All Transactions page focused on flagged/damage return reviews
+            const params = new URLSearchParams({ view: 'flagged' });
+            window.location.href = `admin-all-transaction.php?${params.toString()}`;
         }
     </script>
 
