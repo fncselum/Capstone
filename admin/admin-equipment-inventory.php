@@ -372,6 +372,27 @@ $hasEquipment = !empty($equipment_items);
                         </select>
                     </div>
                 </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="importance_level">Importance Level</label>
+                        <select id="importance_level" name="importance_level">
+                            <option value="">Select level</option>
+                            <option value="Reserved">Reserved</option>
+                            <option value="High-Demand">High-Demand</option>
+                            <option value="Frequently Borrowed">Frequently Borrowed</option>
+                            <option value="Standard">Standard</option>
+                            <option value="Low-Usage">Low-Usage</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="borrow_period_days">Borrow Period (days)</label>
+                        <input type="number" id="borrow_period_days" name="borrow_period_days" min="1" placeholder="e.g., 3">
+                    </div>
+                </div>
                 
                 <div class="form-group">
                     <label for="image_path">Image URL (optional)</label>
@@ -661,6 +682,27 @@ $hasEquipment = !empty($equipment_items);
                                         </select>
                                     </div>
                                 </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="manage_importance_level">Importance Level</label>
+                                        <select id="manage_importance_level" name="importance_level">
+                                            <option value="">Select level</option>
+                                            <option value="Reserved">Reserved</option>
+                                            <option value="High-Demand">High-Demand</option>
+                                            <option value="Frequently Borrowed">Frequently Borrowed</option>
+                                            <option value="Standard">Standard</option>
+                                            <option value="Low-Usage">Low-Usage</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="manage_borrow_period_days">Borrow Period (days)</label>
+                                        <input type="number" id="manage_borrow_period_days" name="borrow_period_days" min="1" value="${equipment.borrow_period_days || ''}" placeholder="e.g., 3">
+                                    </div>
+                                </div>
                                 
                                 <div class="form-group">
                                     <label for="manage_image">Image URL (optional)</label>
@@ -697,6 +739,10 @@ $hasEquipment = !empty($equipment_items);
                         const manageSizeSelect = document.getElementById('manage_size_category');
                         if (manageSizeSelect) {
                             manageSizeSelect.value = equipment.size_category || 'Medium';
+                        }
+                        const manageImportanceSelect = document.getElementById('manage_importance_level');
+                        if (manageImportanceSelect) {
+                            manageImportanceSelect.value = equipment.importance_level || '';
                         }
                     } else {
                         content.innerHTML = `<div class="error-message">${data.message || 'Failed to load equipment details.'}</div>`;
@@ -798,6 +844,46 @@ $hasEquipment = !empty($equipment_items);
                 console.error('Error:', error);
             });
         }
+        
+        // Auto-fill borrow period days from importance level (Add & Manage modals)
+        (function(){
+            const mapDays = (level) => {
+                if (!level) return '';
+                const key = String(level).toLowerCase();
+                if (key === 'reserved' || key === 'high-demand') return 1;
+                if (key === 'frequently borrowed') return 2;
+                if (key === 'standard') return 3;
+                if (key === 'low-usage') return 5;
+                return '';
+            };
+
+            // Add modal
+            const impAdd = document.getElementById('importance_level');
+            const daysAdd = document.getElementById('borrow_period_days');
+            if (impAdd && daysAdd) {
+                impAdd.addEventListener('change', function(){
+                    const v = mapDays(this.value);
+                    if (v !== '') daysAdd.value = v;
+                });
+            }
+
+            // Manage modal (dynamic content) — delegate via MutationObserver
+            const manageModal = document.getElementById('manageModal');
+            if (manageModal) {
+                const obs = new MutationObserver(() => {
+                    const imp = document.getElementById('manage_importance_level');
+                    const days = document.getElementById('manage_borrow_period_days');
+                    if (imp && days && !imp.dataset._bound) {
+                        imp.addEventListener('change', function(){
+                            const v = mapDays(this.value);
+                            if (v !== '') days.value = v;
+                        });
+                        imp.dataset._bound = '1';
+                    }
+                });
+                obs.observe(manageModal, { childList: true, subtree: true });
+            }
+        })();
         
         function showToast(message, type = 'info') {
             const toast = document.createElement('div');

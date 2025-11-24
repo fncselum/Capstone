@@ -21,6 +21,7 @@ $dbname = "capstone";
 $db_connected = true;
 $db_error = null;
 $conn = @new mysqli($host, $user, $password, $dbname);
+require_once __DIR__ . '/../admin/includes/email_config.php';
 if ($conn->connect_error) {
 	$db_connected = false;
 	$db_error = $conn->connect_error;
@@ -31,17 +32,41 @@ $equipment_list = [];
 $message = null;
 $error = null;
 
+// Determine user type (Teacher/Student); fallback query if not in session
+$user_type = $_SESSION['user_type'] ?? null;
+if ($db_connected && !$user_type) {
+    $stmtRole = $conn->prepare("SELECT user_type FROM users WHERE id = ? LIMIT 1");
+    if ($stmtRole) {
+        $stmtRole->bind_param("i", $user_id);
+        if ($stmtRole->execute()) {
+            $resRole = $stmtRole->get_result();
+            if ($resRole && $rowRole = $resRole->fetch_assoc()) {
+                $user_type = $rowRole['user_type'] ?? null;
+                $_SESSION['user_type'] = $user_type;
+            }
+        }
+        $stmtRole->close();
+    }
+}
+$is_teacher = (strtolower((string)$user_type) === 'teacher');
+
 if ($db_connected) {
 	// Handle borrow action
 	if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'borrow') {
 		$equipment_id = (int)($_POST['equipment_id'] ?? 0);
-		$due_date = trim($_POST['due_date'] ?? '');
 		$requested_qty = (int)($_POST['quantity'] ?? 1);
 		if ($requested_qty <= 0) {
 			$requested_qty = 1;
 		}
 
-		if ($equipment_id > 0 && !empty($due_date)) {
+		// Enforce daily borrow cutoff at 5:00 PM (Asia/Manila)
+		$nowDt = new DateTime();
+		$cutoffDt = new DateTime('today 17:00');
+		if ($nowDt >= $cutoffDt) {
+			$error = 'Borrowing is closed after 5:00 PM. Please come back tomorrow.';
+		}
+
+		if (empty($error) && $equipment_id > 0) {
 			$conn->begin_transaction();
 			try {
 				// Get equipment and inventory details with lock
@@ -53,7 +78,9 @@ if ($db_connected) {
 					i.minimum_stock_level,
 					i.availability_status,
 					i.equipment_id AS inventory_equipment_id,
-					i.item_size AS inventory_item_size
+					i.item_size AS inventory_item_size,
+					i.borrow_period_days,
+					i.importance_level
 				FROM equipment e 
 				LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id 
 				WHERE e.id = ? FOR UPDATE");
@@ -75,7 +102,21 @@ if ($db_connected) {
 					$rfid_code = $equip_data['rfid_tag'] ?? '';
 					$inventory_equipment_id = $equip_data['inventory_equipment_id'] ?? null;
 					$item_size = $equip_data['size_category'] ?? $equip_data['inventory_item_size'] ?? 'Medium';
-					
+					$importance_level = trim((string)($equip_data['importance_level'] ?? ''));
+					if (strtolower($importance_level) === 'reserved' && !$is_teacher) {
+						$conn->rollback();
+						$error = 'This item is reserved and can only be borrowed by teachers.';
+						throw new Exception($error);
+					}
+					$map = [
+						'reserved' => 1,
+						'high-demand' => 1,
+						'frequently borrowed' => 2,
+						'standard' => 3,
+						'low-usage' => 5,
+					];
+					$days_from_importance = $map[strtolower($importance_level)] ?? 0;
+					$effective_days = $days_from_importance > 0 ? $days_from_importance : ((int)($equip_data['borrow_period_days'] ?? 0) > 0 ? (int)($equip_data['borrow_period_days'] ?? 0) : 3);
 					// Ensure inventory record exists and item is available
 					if (empty($rfid_code) || empty($inventory_equipment_id)) {
 						$conn->rollback();
@@ -88,7 +129,20 @@ if ($db_connected) {
 							// Determine flow based on size
 							$transaction_type = 'Borrow';
 							$quantity = $requested_qty;
-							$expected_return_date = date('Y-m-d H:i:s', strtotime($due_date));
+							// Compute expected return: High-Demand for students is due today at 5:00 PM (or next day 5 PM if after 5 PM)
+							if (!$is_teacher && strtolower($importance_level) === 'high-demand') {
+								$nowDt = new DateTime();
+								$dueDt = clone $nowDt;
+								$dueDt->setTime(17, 0, 0);
+								if ($nowDt > $dueDt) {
+									$dueDt->modify('+1 day');
+									$dueDt->setTime(17, 0, 0);
+								}
+								$expected_return_date = $dueDt->format('Y-m-d H:i:s');
+							} else {
+								// Default: importance mapping days or per-item days
+								$expected_return_date = date('Y-m-d H:i:s', strtotime("+{$effective_days} days"));
+							}
 							$notes = "Borrowed via kiosk by student ID: " . $student_id;
 							$penalty_applied = 0;
 							$status = 'Active';
@@ -100,12 +154,11 @@ if ($db_connected) {
 							$rejection_reason = null;
 							$return_review_status = 'Pending';
 							$processed_by = $requiresApproval ? null : 1; // Set to admin ID 1 for auto-approved items
-							
+							// Record transaction
 							$trans_stmt = $conn->prepare("INSERT INTO transactions 
 								(user_id, equipment_id, transaction_type, quantity, transaction_date, 
 								expected_return_date, condition_before, status, penalty_applied, notes, item_size, approval_status, approved_by, approved_at, rejection_reason, return_review_status, processed_by, created_at, updated_at) 
 								VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())");
-							
 							$trans_stmt->bind_param("ississsisssissss", 
 								$user_id, 
 								$rfid_code, 
@@ -124,10 +177,8 @@ if ($db_connected) {
 								$return_review_status,
 								$processed_by
 							);
-							
 							if ($trans_stmt->execute()) {
 								$transaction_id = $conn->insert_id;
-								
 								if ($requiresApproval) {
 									$conn->commit();
 									$message = "Borrow request submitted for <strong>$equipment_name</strong>.<br>Status: <strong>Pending Admin Approval</strong><br>Transaction ID: #$transaction_id";
@@ -178,6 +229,9 @@ if ($db_connected) {
 									} else {
 										$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
 									}
+
+									// Email the borrower their expected return date (auto)
+									@sendBorrowNotification($conn, $user_id, $equipment_name, $return_date_formatted);
 								}
 							}
 							else {
@@ -200,8 +254,8 @@ if ($db_connected) {
 				$conn->rollback();
 				$error = 'Borrow failed: ' . $ex->getMessage();
 			}
-		} else {
-			$error = 'Please provide all required information (equipment and return date).';
+		} else if (empty($error)) {
+			$error = 'Please select equipment to borrow.';
 		}
 	}
 
@@ -219,6 +273,8 @@ if ($db_connected) {
 	          i.damaged_quantity,
 	          i.availability_status,
 	          i.item_size,
+	          i.borrow_period_days,
+	          i.importance_level,
 	          COALESCE(i.available_quantity,
 	              GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0)
 	          ) AS computed_available
@@ -228,8 +284,7 @@ if ($db_connected) {
 	          WHERE e.quantity > 0 AND (
 	              (i.available_quantity IS NOT NULL AND i.available_quantity > 0)
 	              OR (i.available_quantity IS NULL AND GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0) > 0)
-	          )
-	          ORDER BY e.id ASC";
+	          ) ORDER BY e.id ASC";
 	if ($result = $conn->query($query)) {
 		while ($row = $result->fetch_assoc()) { $equipment_list[] = $row; }
 		$result->free();
@@ -374,6 +429,16 @@ if ($db_connected) {
 								$availableQty = (int)($item['computed_available'] ?? $item['available_quantity'] ?? 0);
 								$itemSize = $item['size_category'] ?? $item['item_size'] ?? 'Medium';
 								$isLarge = strtolower($itemSize) === 'large';
+								$importance_level = trim((string)($item['importance_level'] ?? ''));
+								$map = [
+									'reserved' => 1,
+									'high-demand' => 1,
+									'frequently borrowed' => 2,
+									'standard' => 3,
+									'low-usage' => 5,
+								];
+								$days_from_importance = $map[strtolower($importance_level)] ?? 0;
+								$effective_days = $days_from_importance > 0 ? $days_from_importance : ((int)($item['borrow_period_days'] ?? 0) > 0 ? (int)($item['borrow_period_days'] ?? 0) : 3);
 							?>
 					<div class="equip-card" 
 						data-name="<?= htmlspecialchars(strtolower($item['name'])) ?>" 
@@ -413,9 +478,12 @@ if ($db_connected) {
 							<?php endif; ?>
 						</div>
 						
-						<button class="borrow-btn" onclick='openBorrowModal(<?= (int)$item['id'] ?>, <?= json_encode($item['name'] ?? '') ?>, <?= $availableQty ?>, <?= json_encode($item['image_path'] ?? '') ?>, <?= json_encode($itemSize) ?>)'>
-							<i class="fas fa-hand-holding"></i> Borrow
-						</button>
+						<?php 
+                            $isReservedNonTeacher = (strtolower((string)($item['importance_level'] ?? '')) === 'reserved') && !$is_teacher;
+                        ?>
+                        <button class="borrow-btn" <?= $isReservedNonTeacher ? 'disabled' : '' ?> onclick='<?= $isReservedNonTeacher ? 'showReservedNotice()' : 'openBorrowModal(' . (int)$item['id'] . ', ' . json_encode($item['name'] ?? '') . ', ' . $availableQty . ', ' . json_encode($item['image_path'] ?? '') . ', ' . json_encode($itemSize) . ', ' . $effective_days . ', ' . json_encode($item['importance_level'] ?? '') . ')' ?>'>
+                            <i class="fas fa-hand-holding"></i> <?= $isReservedNonTeacher ? 'Reserved (Teachers Only)' : 'Borrow' ?>
+                        </button>
 					</div>
 					<?php endforeach; ?>
 				<?php endif; ?>
@@ -480,9 +548,10 @@ if ($db_connected) {
 						</div>
 						
 						<div class="form-field">
-							<label><i class="fas fa-calendar-check"></i> Return By</label>
-							<input type="datetime-local" id="due_date" name="due_date" required>
-							<small>Select when you plan to return this equipment</small>
+							<label><i class="fas fa-calendar-check"></i> Expected Return</label>
+							<input type="text" id="expected_return_display" readonly>
+							<input type="hidden" id="due_date" name="due_date">
+							<small>Automatically set to borrow time + <span id="expected_days_hint"></span> day(s)</small>
 						</div>
 						
 						<!-- Acknowledgment above buttons -->
@@ -511,6 +580,7 @@ if ($db_connected) {
 	</div>
 
 	<script>
+	const IS_TEACHER = <?= $is_teacher ? 'true' : 'false' ?>;
 	function goBack() {
 		window.location.href = 'borrow-return.php';
 	}
@@ -555,7 +625,39 @@ if ($db_connected) {
 		}
 	}
 
-	function openBorrowModal(equipmentId, equipmentName, quantity, imagePath, sizeCategory = 'Medium') {
+	function isAfterBorrowCutoff() {
+        const now = new Date();
+        const cutoff = new Date();
+        cutoff.setHours(17, 0, 0, 0);
+        return now.getTime() >= cutoff.getTime();
+    }
+
+    function showBorrowClosedNotice() {
+        const overlay = document.createElement('div');
+        overlay.className = 'notification-modal';
+        overlay.style.display = 'flex';
+        overlay.innerHTML = `
+            <div class="notification-modal-content error-modal">
+                <div class="error-icon-wrapper"><i class="fas fa-clock"></i></div>
+                <h2 class="notification-title">Borrowing Closed</h2>
+                <p class="notification-message">Borrowing is closed after 5:00 PM. Please come back tomorrow.</p>
+                <button class="notification-btn" onclick="this.closest('.notification-modal').remove()"><i class="fas fa-check"></i> Okay</button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    function enforceBorrowCutoffUI() {
+        if (!isAfterBorrowCutoff()) return;
+        document.querySelectorAll('.borrow-btn').forEach(btn => {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-lock"></i> Borrowing Closed (after 5 PM)';
+            btn.onclick = showBorrowClosedNotice;
+        });
+    }
+
+    function openBorrowModal(equipmentId, equipmentName, quantity, imagePath, sizeCategory = 'Medium', borrowDays = 3, importanceLevel = '') {
+        if (isAfterBorrowCutoff()) { showBorrowClosedNotice(); return; }
 		document.getElementById('modalEquipmentId').value = equipmentId;
 		document.getElementById('modalEquipmentName').textContent = equipmentName;
 		document.getElementById('modalEquipmentQty').textContent = quantity;
@@ -564,8 +666,6 @@ if ($db_connected) {
 		updateQuantityDisplay(1);
 		currentItemSize = sizeCategory || 'Medium';
 		applySizeUI(currentItemSize);
-
-
 
 		const imageElement = document.getElementById('modalEquipmentImage');
 		const iconElement = document.getElementById('modalEquipmentIcon');
@@ -604,22 +704,45 @@ if ($db_connected) {
 		// Update every second
 		const borrowTimeInterval = setInterval(updateBorrowTime, 1000);
 		
-		// Set minimum date to current date/time
-		const now = new Date();
-		const year = now.getFullYear();
-		const month = String(now.getMonth() + 1).padStart(2, '0');
-		const day = String(now.getDate()).padStart(2, '0');
-		const hours = String(now.getHours()).padStart(2, '0');
-		const minutes = String(now.getMinutes()).padStart(2, '0');
-		const currentDateTime = `${year}-${month}-${day}T${hours}:${minutes}`;
-		
-		const dueDateInput = document.getElementById('due_date');
-		dueDateInput.min = currentDateTime;
-		
-		// Set default to 1 day from now
-		const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-		const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}T${hours}:${minutes}`;
-		dueDateInput.value = tomorrowStr;
+		// Compute expected return date with High-Demand rule for students (due 5:00 PM today, else next day 5:00 PM)
+        const now = new Date();
+        let expected = null;
+        const imp = String(importanceLevel || '').toLowerCase();
+        if (!IS_TEACHER && imp === 'high-demand') {
+            expected = new Date(now);
+            expected.setHours(17, 0, 0, 0);
+            const dueToday = new Date(expected);
+            if (now.getTime() > dueToday.getTime()) {
+                expected = new Date(now);
+                expected.setDate(now.getDate() + 1);
+                expected.setHours(17, 0, 0, 0);
+            }
+        } else {
+            const days = Math.max(parseInt(borrowDays, 10) || 3, 1);
+            expected = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+        }
+
+        const expYear = expected.getFullYear();
+        const expMonth = String(expected.getMonth() + 1).padStart(2, '0');
+        const expDay = String(expected.getDate()).padStart(2, '0');
+        const expHours = String(expected.getHours()).padStart(2, '0');
+        const expMinutes = String(expected.getMinutes()).padStart(2, '0');
+        const expIsoLocal = `${expYear}-${expMonth}-${expDay}T${expHours}:${expMinutes}`;
+        const display = expected.toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:true });
+        document.getElementById('due_date').value = expIsoLocal; // hidden form value
+        const dispEl = document.getElementById('expected_return_display');
+        if (dispEl) dispEl.value = display;
+        const hintDays = document.getElementById('expected_days_hint');
+        if (hintDays) {
+            if (!IS_TEACHER && String(importanceLevel || '').toLowerCase() === 'high-demand') {
+                // Replace hint with time-based message
+                const isToday = (new Date().toDateString() === expected.toDateString());
+                hintDays.textContent = isToday ? 'today 5:00 PM' : 'tomorrow 5:00 PM';
+            } else {
+                const days = Math.max(parseInt(borrowDays, 10) || 3, 1);
+                hintDays.textContent = String(days);
+            }
+        }
 		
 		// Store interval ID to clear it later
 		document.getElementById('borrowModal').dataset.intervalId = borrowTimeInterval;
@@ -692,6 +815,7 @@ if ($db_connected) {
 				filterEquipmentByCategory();
 			});
 		});
+		enforceBorrowCutoffUI();
 	});
 
 	// Auto-refresh equipment list
@@ -749,6 +873,14 @@ if ($db_connected) {
 				}
 			}
 
+			// Determine effective borrow days using importance mapping, else per-item period, else 3
+			const imp = String(item.importance_level || '').toLowerCase();
+			const map = { 'reserved':1, 'high-demand':1, 'frequently borrowed':2, 'standard':3, 'low-usage':5 };
+			const daysFromImportance = map[imp] || 0;
+			const perItemDays = parseInt(item.borrow_period_days ?? 0) || 0;
+			const effectiveDays = daysFromImportance > 0 ? daysFromImportance : (perItemDays > 0 ? perItemDays : 3);
+
+			const isReservedNonTeacher = (imp === 'reserved') && !IS_TEACHER;
 			html += `
 				<div class="equip-card" 
 					data-name="${(item.name || '').toLowerCase()}" 
@@ -778,15 +910,16 @@ if ($db_connected) {
 						${isLarge ? '<div class="large-item-banner">⚠ Requires admin approval</div>' : ''}
 					</div>
 					
-					<button class="borrow-btn" onclick='openBorrowModal(${item.id}, ${JSON.stringify(item.name || '')}, ${availableQty}, ${JSON.stringify(item.image_path || '')}, ${JSON.stringify(sizeCategory)})'>
-						<i class="fas fa-hand-holding"></i> Borrow
-					</button>
-				</div>
-			`;
-		});
+					                    <button class="borrow-btn" ${isReservedNonTeacher ? 'disabled' : ''} onclick='${isReservedNonTeacher ? 'showReservedNotice()' : `openBorrowModal(${item.id}, ${JSON.stringify(item.name || '')}, ${availableQty}, ${JSON.stringify(item.image_path || '')}, ${JSON.stringify(sizeCategory)}, ${effectiveDays}, ${JSON.stringify(item.importance_level || '')})`}'>
+                        <i class="fas fa-hand-holding"></i> ${isReservedNonTeacher ? 'Reserved (Teachers Only)' : 'Borrow'}
+                    </button>
+                </div>
+                `;
+        });
 
 		grid.innerHTML = html;
-		
+		// Apply cutoff disabling on freshly rendered buttons
+		enforceBorrowCutoffUI();
 		// Reapply category filter
 		filterEquipmentByCategory();
 	}

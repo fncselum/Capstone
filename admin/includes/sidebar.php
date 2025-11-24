@@ -48,10 +48,27 @@ $current_page = basename($_SERVER['PHP_SELF']);
                         <span>Maintenance Tracker</span>
                     </a>
                 </li>
+            </ul>
+        </li>
+
+        <!-- Users -->
+        <li class="nav-item has-submenu <?= in_array($current_page, ['admin-authorized-users.php', 'admin-user-activity.php']) ? 'active' : '' ?>">
+            <a href="#" class="submenu-toggle">
+                <i class="fas fa-users" style="color: #10b981;"></i>
+                <span>Users</span>
+                <i class="fas fa-chevron-down submenu-arrow"></i>
+            </a>
+            <ul class="submenu">
                 <li class="<?= $current_page === 'admin-authorized-users.php' ? 'active' : '' ?>">
                     <a href="admin-authorized-users.php">
                         <i class="fas fa-user-check"></i>
                         <span>Authorized Users</span>
+                    </a>
+                </li>
+                <li class="<?= $current_page === 'admin-user-activity.php' ? 'active' : '' ?>">
+                    <a href="admin-user-activity.php">
+                        <i class="fas fa-clipboard-list"></i>
+                        <span>System Activity Log</span>
                     </a>
                 </li>
             </ul>
@@ -144,12 +161,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     <a href="reports.php">
                         <i class="fas fa-file-alt"></i>
                         <span>Transaction Reports</span>
-                    </a>
-                </li>
-                <li class="<?= $current_page === 'admin-user-activity.php' ? 'active' : '' ?>">
-                    <a href="admin-user-activity.php">
-                        <i class="fas fa-users"></i>
-                        <span>System Activity Log</span>
                     </a>
                 </li>
             </ul>

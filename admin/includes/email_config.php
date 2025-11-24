@@ -15,7 +15,7 @@ use PHPMailer\PHPMailer\Exception;
 define('SMTP_HOST', 'smtp.gmail.com');
 define('SMTP_PORT', 587);
 define('SMTP_USERNAME', 'fnsclr1418@gmail.com'); // Update with your Gmail
-define('SMTP_PASSWORD', 'xdoe hmsh swuu geqb'); // Update with your Gmail App Password
+define('SMTP_PASSWORD', 'nyrh gitr ijwp ncxr'); // Update with your Gmail App Password
 define('SMTP_ENCRYPTION', 'tls');
 define('SYSTEM_EMAIL_FROM', 'fnsclr1418@gmail.com'); // Update with your Gmail
 define('SYSTEM_EMAIL_NAME', 'Equipment Kiosk System');
@@ -27,14 +27,11 @@ function isEmailAlertsEnabled($conn) {
     try {
         $stmt = $conn->prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'enable_email_alerts'");
         if (!$stmt) return false;
-        
         $stmt->execute();
         $result = $stmt->get_result();
-        
         if ($result && $row = $result->fetch_assoc()) {
             return ($row['setting_value'] == '1');
         }
-        
         $stmt->close();
         return false;
     } catch (Exception $e) {

@@ -34,6 +34,39 @@ function initializeEventListeners() {
         e.preventDefault();
         submitEditUser();
     });
+
+    // Photo preview: Add modal
+    const addPhotoInput = document.getElementById('photo');
+    if (addPhotoInput) {
+        addPhotoInput.addEventListener('change', function() {
+            const file = this.files && this.files[0];
+            const wrapper = document.getElementById('addPhotoPreviewWrapper');
+            const img = document.getElementById('addPhotoPreview');
+            if (file && img && wrapper) {
+                const url = URL.createObjectURL(file);
+                img.src = url;
+                wrapper.style.display = 'block';
+            } else if (wrapper) {
+                wrapper.style.display = 'none';
+            }
+        });
+    }
+
+    // Photo preview: Edit modal (new upload)
+    const editPhotoInput = document.getElementById('editPhoto');
+    if (editPhotoInput) {
+        editPhotoInput.addEventListener('change', function() {
+            const file = this.files && this.files[0];
+            const fetchedWrapper = document.getElementById('editPhotoFetchedWrapper');
+            const fetchedImg = document.getElementById('editPhotoFetched');
+            if (file && fetchedWrapper && fetchedImg) {
+                const url = URL.createObjectURL(file);
+                fetchedImg.src = url;
+                fetchedImg.style.display = 'block';
+                fetchedWrapper.style.display = 'flex';
+            }
+        });
+    }
 }
 
 /**
@@ -82,7 +115,7 @@ function displayUsers(users) {
     if (users.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="7" class="empty-cell">
+                <td colspan="8" class="empty-cell">
                     <i class="fas fa-users"></i><br>
                     No users found
                 </td>
@@ -95,8 +128,9 @@ function displayUsers(users) {
         <tr>
             <td>${escapeHtml(user.id)}</td>
             <td><code>${escapeHtml(user.student_id)}</code></td>
-            <td><strong>${escapeHtml(user.student_id)}</strong></td>
+            <td>${user.email ? escapeHtml(user.email) : '<span style="color:#9ca3af">—</span>'}</td>
             <td><span class="status-badge ${user.status.toLowerCase()}">${escapeHtml(user.status)}</span></td>
+            <td>${escapeHtml(user.user_type || 'Student')}</td>
             <td>
                 <span class="penalty-badge ${user.penalty_points > 0 ? 'has-penalty' : ''}">
                     ${user.penalty_points}
@@ -125,6 +159,8 @@ function displayUsers(users) {
  */
 function openAddModal() {
     document.getElementById('addUserForm').reset();
+    const wrapper = document.getElementById('addPhotoPreviewWrapper');
+    if (wrapper) wrapper.style.display = 'none';
     document.getElementById('addModal').classList.add('active');
 }
 
@@ -195,7 +231,32 @@ async function openEditModal(userId) {
                 document.getElementById('editUserId').value = user.id;
                 document.getElementById('editStudentId').value = user.student_id; // Same as rfid_tag
                 document.getElementById('editStatus').value = user.status;
+                const editRoleEl = document.getElementById('editUserType');
+                if (editRoleEl) editRoleEl.value = (user.user_type === 'Teacher' ? 'Teacher' : 'Student');
+                const editEmailEl = document.getElementById('editEmail');
+                if (editEmailEl) editEmailEl.value = user.email || '';
                 document.getElementById('editPenaltyPoints').value = user.penalty_points;
+                // Clear new upload input
+                const editPhotoInput = document.getElementById('editPhoto');
+                if (editPhotoInput) editPhotoInput.value = '';
+                // Fetch stored photo (BLOB or path) and show centered below uploader
+                try {
+                    const resp = await fetch(`api/get_user_photo.php?id=${encodeURIComponent(user.id)}`);
+                    const pdata = await resp.json();
+                    const fetchedWrapper = document.getElementById('editPhotoFetchedWrapper');
+                    const fetchedImg = document.getElementById('editPhotoFetched');
+                    if (pdata && pdata.success && pdata.dataUrl && fetchedWrapper && fetchedImg) {
+                        fetchedImg.src = pdata.dataUrl;
+                        fetchedImg.style.display = 'block';
+                        fetchedWrapper.style.display = 'flex';
+                    } else if (fetchedWrapper && fetchedImg) {
+                        fetchedImg.removeAttribute('src');
+                        fetchedImg.style.display = 'none';
+                        fetchedWrapper.style.display = 'flex';
+                    }
+                } catch (e) {
+                    // ignore fetch errors to avoid blocking modal
+                }
                 
                 document.getElementById('editModal').classList.add('active');
             }
@@ -371,23 +432,53 @@ function escapeHtml(text) {
  * Show alert message
  */
 function showAlert(message, type = 'success') {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type}`;
-    alertDiv.innerHTML = `
-        <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-        <span>${message}</span>
+    // Ensure toast container exists
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = `
+            position: fixed; top: 16px; right: 16px; z-index: 99999;
+            display: flex; flex-direction: column; gap: 10px; align-items: flex-end;`;
+        document.body.appendChild(container);
+    }
+
+    const bg = type === 'success' ? '#ecfdf5' : '#fef2f2';
+    const border = type === 'success' ? '#10b981' : '#ef4444';
+    const icon = type === 'success' ? 'check-circle' : 'exclamation-circle';
+    const color = type === 'success' ? '#065f46' : '#7f1d1d';
+
+    const toast = document.createElement('div');
+    toast.setAttribute('role', 'status');
+    toast.style.cssText = `
+        min-width: 280px; max-width: 420px; display: flex; align-items: center; gap: 10px;
+        background: ${bg}; border: 1px solid ${border}; color: ${color};
+        border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        transform: translateY(-12px); opacity: 0; transition: all .25s ease;`;
+
+    toast.innerHTML = `
+        <i class="fas fa-${icon}" style="min-width:18px;"></i>
+        <div style="flex:1; font-weight:600;">${message}</div>
+        <button aria-label="Close" style="background:transparent; border:none; color:${color}; font-size:16px; cursor:pointer;">&times;</button>
     `;
-    
-    // Insert at top of main content
-    const mainContent = document.querySelector('.main-content');
-    mainContent.insertBefore(alertDiv, mainContent.firstChild);
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-        alertDiv.style.opacity = '0';
-        alertDiv.style.transition = 'opacity 0.3s';
-        setTimeout(() => alertDiv.remove(), 300);
-    }, 5000);
+
+    const closeBtn = toast.querySelector('button');
+    closeBtn.addEventListener('click', () => dismiss());
+
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.transform = 'translateY(0)';
+        toast.style.opacity = '1';
+    });
+
+    let timeout = setTimeout(() => dismiss(), 4000);
+
+    function dismiss() {
+        clearTimeout(timeout);
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-8px)';
+        setTimeout(() => toast.remove(), 200);
+    }
 }
 
 /**

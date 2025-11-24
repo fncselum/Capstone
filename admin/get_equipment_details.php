@@ -32,7 +32,9 @@ try {
             c.name as category_name,
             i.borrowed_quantity,
             GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0), 0) AS computed_available,
-            i.item_condition
+            i.item_condition,
+            i.borrow_period_days,
+            i.importance_level
             FROM equipment e
             LEFT JOIN categories c ON e.category_id = c.id
             LEFT JOIN inventory i ON e.rfid_tag = i.equipment_id

@@ -49,9 +49,7 @@ $default_settings = [
     'system_name' => 'Equipment Management System',
     'institution_name' => 'De La Salle ASMC',
     'contact_email' => 'admin@dlsasmc.edu.ph',
-    'max_borrow_days' => '7',
     'overdue_penalty_rate' => '10.00',
-    'max_items_per_borrow' => '3',
     'enable_notifications' => '1',
     'enable_email_alerts' => '0',
     'maintenance_mode' => '0',
@@ -539,19 +537,7 @@ if ($size_result) {
                                 <small>Primary contact email for the system</small>
                             </div>
                             
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="max_borrow_days">Max Borrow Days</label>
-                                    <input type="number" id="max_borrow_days" name="max_borrow_days" value="<?= htmlspecialchars($settings['max_borrow_days']) ?>" min="1" required>
-                                    <small>Maximum days for borrowing</small>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label for="max_items_per_borrow">Max Items Per Borrow</label>
-                                    <input type="number" id="max_items_per_borrow" name="max_items_per_borrow" value="<?= htmlspecialchars($settings['max_items_per_borrow']) ?>" min="1" required>
-                                    <small>Maximum items per transaction</small>
-                                </div>
-                            </div>
+                            
                             
                             <div class="form-group">
                                 <label for="overdue_penalty_rate">Overdue Penalty Rate (₱/day)</label>

@@ -295,7 +295,12 @@ if (!$conn->connect_error) {
                 <div id="penaltyNotice" style="
                     display:none; margin-top:14px; background:#fff4e6; border:1px solid #f3d6b3; color:#8a5a2b;
                     border-radius:12px; padding:12px; font-size:0.95rem;">
-                    <i class="fas fa-info-circle"></i> Please settle outstanding penalties at the admin desk before borrowing again.
+                    <i class="fas a-info-circle"></i> Please settle outstanding penalties at the admin desk before borrowing again.
+                </div>
+                <div id="activePenaltiesSection" style="margin-top:16px;">
+                    <h3 style="margin:0 0 8px; font-size:1.05rem; color:#234;">Active Penalties</h3>
+                    <div id="activePenaltiesList" style="display:flex; flex-direction:column; gap:8px;"></div>
+                    <div id="noActivePenalties" style="display:none; color:#667; font-size:0.95rem;">No active penalties.</div>
                 </div>
             `;
 
@@ -342,6 +347,81 @@ if (!$conn->connect_error) {
                 })
                 .catch(() => {
                     // Leave defaults if fetch fails
+                });
+
+            // Load active penalties list
+            const fmtDateTime = (d) => {
+                if (!d) return '—';
+                const dt = new Date(d.replace(' ', 'T'));
+                if (isNaN(dt.getTime())) return '—';
+                return dt.toLocaleString(undefined, { month: 'short', day: '2-digit', year: 'numeric' });
+            };
+            const peso = (v) => `₱${Number(v || 0).toFixed(2)}`;
+
+            function openPenaltyDetail(p) {
+                const detail = document.createElement('div');
+                detail.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); display:flex; align-items:center; justify-content:center; z-index:10000;';
+                const box = document.createElement('div');
+                box.style.cssText = 'background:#fff; border-radius:14px; max-width:560px; width:92%; padding:20px;';
+                box.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 style="margin:0; font-size:1.1rem; color:#1e293b;">Penalty #${p.id}</h3>
+                        <button style="border:none; background:#f3f4f6; padding:6px 10px; border-radius:8px; cursor:pointer;">Close</button>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div><div style="color:#64748b; font-size:0.85rem;">Type</div><div style="font-weight:700;">${p.penalty_type || '—'}</div></div>
+                        <div><div style="color:#64748b; font-size:0.85rem;">Amount</div><div style="font-weight:700;">${peso(p.amount)}</div></div>
+                        <div><div style="color:#64748b; font-size:0.85rem;">Equipment</div><div style="font-weight:700;">${(p.equipment_name || p.equipment_id || '—')}</div></div>
+                        <div><div style="color:#64748b; font-size:0.85rem;">Severity</div><div style="font-weight:700; text-transform:capitalize;">${p.damage_severity || '—'}</div></div>
+                        <div><div style="color:#64748b; font-size:0.85rem;">Status</div><div style="font-weight:700;">${p.status || '—'}</div></div>
+                        <div><div style="color:#64748b; font-size:0.85rem;">Date Imposed</div><div style="font-weight:700;">${fmtDateTime(p.date_imposed || p.created_at)}</div></div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <div style="color:#64748b; font-size:0.85rem;">Description</div>
+                        <div style="white-space:pre-wrap;">${(p.description || '').toString().trim() || '—'}</div>
+                    </div>
+                    ${p.damage_notes ? `<div style="margin-top:10px;"><div style="color:#64748b; font-size:0.85rem;">Admin Notes</div><div style="white-space:pre-wrap;">${p.damage_notes}</div></div>` : ''}
+                `;
+                const closeBtn = box.querySelector('button');
+                closeBtn.addEventListener('click', () => detail.remove());
+                detail.addEventListener('click', (e) => { if (e.target === detail) detail.remove(); });
+                detail.appendChild(box);
+                document.body.appendChild(detail);
+            }
+
+            fetch('api/get_penalties_list.php', { credentials: 'same-origin' })
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('activePenaltiesList');
+                    const empty = document.getElementById('noActivePenalties');
+                    if (!data.success) {
+                        empty.style.display = '';
+                        return;
+                    }
+                    const items = data.penalties || [];
+                    if (items.length === 0) {
+                        empty.style.display = '';
+                        return;
+                    }
+                    empty.style.display = 'none';
+                    items.forEach(p => {
+                        const row = document.createElement('button');
+                        row.type = 'button';
+                        row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid #e5e7eb; background:#fff; border-radius:10px; cursor:pointer; text-align:left;';
+                        row.innerHTML = `
+                            <div>
+                                <div style="font-weight:700; color:#111827;">${p.penalty_type || 'Penalty'} · ${p.equipment_name || p.equipment_id || ''}</div>
+                                <div style="font-size:0.85rem; color:#6b7280;">Imposed: ${fmtDateTime(p.date_imposed || p.created_at)} · Status: ${p.status || '—'}</div>
+                            </div>
+                            <div style="font-weight:700; color:#14532d;">${peso(p.amount)}</div>
+                        `;
+                        row.addEventListener('click', () => openPenaltyDetail(p));
+                        list.appendChild(row);
+                    });
+                })
+                .catch(() => {
+                    const empty = document.getElementById('noActivePenalties');
+                    empty.style.display = '';
                 });
         }
         

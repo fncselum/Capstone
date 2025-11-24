@@ -33,6 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $quantity = trim($_POST['quantity'] ?? '');
         $description = trim($_POST['description'] ?? '');
         $image_url = trim($_POST['image_path'] ?? '');
+        $borrow_period_days = isset($_POST['borrow_period_days']) && $_POST['borrow_period_days'] !== '' ? (int)$_POST['borrow_period_days'] : null;
+        $importance_level = trim($_POST['importance_level'] ?? '');
         $size_category = trim($_POST['size_category'] ?? '');
         $allowed_sizes = ['Small', 'Medium', 'Large'];
         
@@ -199,6 +201,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $update_fields[] = 'updated_at = NOW()';
                     }
                     
+                    // If importance_level exists, include it
+                    if (in_array('importance_level', $existing_columns)) {
+                        $update_fields[] = 'importance_level = :importance_level';
+                        $params[':importance_level'] = ($importance_level !== '') ? $importance_level : null;
+                    }
+
+                    // If borrow_period_days column exists, include it (auto-map from importance when provided)
+                    if (in_array('borrow_period_days', $existing_columns)) {
+                        $mapped_days = null;
+                        if ($importance_level !== '') {
+                            $lvl = strtolower($importance_level);
+                            if ($lvl === 'reserved' || $lvl === 'high-demand') { $mapped_days = 1; }
+                            elseif ($lvl === 'frequently borrowed') { $mapped_days = 2; }
+                            elseif ($lvl === 'standard') { $mapped_days = 3; }
+                            elseif ($lvl === 'low-usage') { $mapped_days = 5; }
+                        }
+                        $update_fields[] = 'borrow_period_days = :borrow_period_days';
+                        $params[':borrow_period_days'] = ($mapped_days !== null) ? $mapped_days : $borrow_period_days;
+                    }
+
                     // Execute inventory update
                     $inventory_sql = "UPDATE inventory SET " . implode(', ', $update_fields) . " WHERE equipment_id = :equipment_id";
                     $inventory_stmt = $pdo->prepare($inventory_sql);

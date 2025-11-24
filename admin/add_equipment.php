@@ -34,8 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $category_id = trim($_POST['category_id'] ?? '');
         $quantity = trim($_POST['quantity'] ?? '');
         $description = trim($_POST['description'] ?? '');
+        $borrow_period_days = isset($_POST['borrow_period_days']) && $_POST['borrow_period_days'] !== '' ? (int)$_POST['borrow_period_days'] : null;
         $image_url = trim($_POST['image_path'] ?? ''); // From form field "image_path" for URL
         $size_category = trim($_POST['size_category'] ?? '');
+        $importance_level = trim($_POST['importance_level'] ?? '');
         $allowed_sizes = ['Small', 'Medium', 'Large'];
         
         // Validation
@@ -189,7 +191,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $values[] = ':item_size';
                         $params[':item_size'] = $size_category;
                     }
+
+                    if (in_array('borrow_period_days', $existing_columns)) {
+                        // If importance is provided, auto-map days from tier; else use provided value
+                        $mapped_days = null;
+                        if ($importance_level !== '') {
+                            $lvl = strtolower($importance_level);
+                            if ($lvl === 'reserved' || $lvl === 'high-demand') { $mapped_days = 1; }
+                            elseif ($lvl === 'frequently borrowed') { $mapped_days = 2; }
+                            elseif ($lvl === 'standard') { $mapped_days = 3; }
+                            elseif ($lvl === 'low-usage') { $mapped_days = 5; }
+                        }
+                        $fields[] = 'borrow_period_days';
+                        $values[] = ':borrow_period_days';
+                        $params[':borrow_period_days'] = ($mapped_days !== null) ? $mapped_days : $borrow_period_days;
+                    }
                     
+                    if (in_array('importance_level', $existing_columns)) {
+                        $fields[] = 'importance_level';
+                        $values[] = ':importance_level';
+                        $params[':importance_level'] = ($importance_level !== '') ? $importance_level : null;
+                    }
+
                     if (in_array('availability_status', $existing_columns)) {
                         $fields[] = 'availability_status';
                         $values[] = ':availability_status';

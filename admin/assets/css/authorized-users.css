@@ -329,8 +329,9 @@
 
 .modal.active {
     display: flex;
-    align-items: center;
+    align-items: flex-start; /* prevent top being cut off on smaller viewports */
     justify-content: center;
+    padding-top: 40px; /* ensure space from top when opened */
 }
 
 .modal-content {
@@ -338,6 +339,8 @@
     border-radius: 12px;
     max-width: 500px;
     width: 100%;
+    max-height: 86vh; /* keep within viewport height */
+    overflow: auto; /* scroll inside modal if content is long */
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
     animation: slideDown 0.3s ease;
 }

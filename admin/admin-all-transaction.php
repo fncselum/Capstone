@@ -1102,6 +1102,7 @@ if (!$all_transactions) {
                                 <th>Student</th>
                                 <th>Quantity</th>
                                 <th>Transaction Date</th>
+                                <th>Expected Return Date</th>
                                 <th>Return Date</th>
                                 <th>Return Verification</th>
                                 <th>Status</th>
@@ -1302,6 +1303,13 @@ if (!$all_transactions) {
                                 <td>
                                     <?php if (!empty($row['txn_datetime'])): ?>
                                         <?= date('M j, Y g:i A', strtotime($row['txn_datetime'])) ?>
+                                    <?php else: ?>
+                                        <span style="color:#999;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (!empty($row['expected_return_date']) && $row['expected_return_date'] !== '0000-00-00 00:00:00'): ?>
+                                        <?= date('M j, Y g:i A', strtotime($row['expected_return_date'])) ?>
                                     <?php else: ?>
                                         <span style="color:#999;">N/A</span>
                                     <?php endif; ?>

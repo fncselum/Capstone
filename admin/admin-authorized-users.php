@@ -94,8 +94,9 @@ $stats['suspended'] = $conn->query("SELECT COUNT(*) as count FROM users WHERE st
                             <tr>
                                 <th>ID</th>
                                 <th>Student RFID ID</th>
-                                <th>Verified</th>
+                                <th>Email</th>
                                 <th>Status</th>
+                                <th>Role</th>
                                 <th>Penalty Points</th>
                                 <th>Registered</th>
                                 <th>Actions</th>
@@ -121,7 +122,7 @@ $stats['suspended'] = $conn->query("SELECT COUNT(*) as count FROM users WHERE st
                 <h2>Add Authorized User</h2>
                 <button class="modal-close" onclick="closeAddModal()">&times;</button>
             </div>
-            <form id="addUserForm" class="modal-body">
+            <form id="addUserForm" class="modal-body" enctype="multipart/form-data">
                 <div class="alert-info" style="background: #e3f2fd; padding: 12px; border-radius: 8px; margin-bottom: 20px; color: #1565c0; font-size: 0.9rem;">
                     <i class="fas fa-info-circle"></i> <strong>Note:</strong> Scan student ID card to auto-fill or manually enter student RFID ID
                 </div>
@@ -136,6 +137,27 @@ $stats['suspended'] = $conn->query("SELECT COUNT(*) as count FROM users WHERE st
                         <option value="Active">Active</option>
                         <option value="Inactive">Inactive</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label for="userType">Role</label>
+                    <select id="userType" name="user_type">
+                        <option value="Student">Student</option>
+                        <option value="Teacher">Teacher</option>
+                    </select>
+                    <small class="form-hint">Teachers can borrow Reserved items.</small>
+                </div>
+                <div class="form-group">
+                    <label for="email">Email <span class="required">*</span></label>
+                    <input type="email" id="email" name="email" placeholder="student@example.com" required>
+                    <small class="form-hint">Required. Must be a valid email for notifications.</small>
+                </div>
+                <div class="form-group">
+                    <label for="photo">Student Photo (for face verification)</label>
+                    <input type="file" id="photo" name="photo" accept="image/*">
+                    <small class="form-hint">Accepted: JPG/PNG up to 2MB</small>
+                    <div id="addPhotoPreviewWrapper" style="margin-top:8px; display:none;">
+                        <img id="addPhotoPreview" src="" alt="Preview" style="max-width:120px; border-radius:8px; border:1px solid #e5e7eb;"/>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-cancel" onclick="closeAddModal()">Cancel</button>
@@ -152,7 +174,7 @@ $stats['suspended'] = $conn->query("SELECT COUNT(*) as count FROM users WHERE st
                 <h2>Edit User</h2>
                 <button class="modal-close" onclick="closeEditModal()">&times;</button>
             </div>
-            <form id="editUserForm" class="modal-body">
+            <form id="editUserForm" class="modal-body" enctype="multipart/form-data">
                 <input type="hidden" id="editUserId" name="id">
                 <div class="alert-info" style="background: #e3f2fd; padding: 12px; border-radius: 8px; margin-bottom: 20px; color: #1565c0; font-size: 0.9rem;">
                     <i class="fas fa-info-circle"></i> <strong>Note:</strong> Scan student ID card to auto-fill or manually enter student RFID ID
@@ -171,9 +193,31 @@ $stats['suspended'] = $conn->query("SELECT COUNT(*) as count FROM users WHERE st
                     </select>
                 </div>
                 <div class="form-group">
+                    <label for="editUserType">Role</label>
+                    <select id="editUserType" name="user_type">
+                        <option value="Student">Student</option>
+                        <option value="Teacher">Teacher</option>
+                    </select>
+                    <small class="form-hint">Teachers can borrow Reserved items.</small>
+                </div>
+                <div class="form-group">
+                    <label for="editEmail">Email <span class="required">*</span></label>
+                    <input type="email" id="editEmail" name="email" placeholder="student@example.com" required>
+                    <small class="form-hint">Required. Must be a valid email for notifications.</small>
+                </div>
+                <div class="form-group">
                     <label for="editPenaltyPoints">Penalty Points</label>
                     <input type="number" id="editPenaltyPoints" name="penalty_points" min="0" value="0">
                     <small class="form-hint">Accumulated penalty points</small>
+                </div>
+                <div class="form-group">
+                    <label for="editPhoto">Upload New Photo</label>
+                    <input type="file" id="editPhoto" name="photo" accept="image/*">
+                    <small class="form-hint">Accepted: JPG/PNG up to 2MB</small>
+                    <div id="editPhotoFetchedWrapper" style="margin-top:12px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                        <img id="editPhotoFetched" src="" alt="Student Photo" style="max-width:160px; border-radius:10px; border:1px solid #e5e7eb; background:#ffffff; padding:6px; display:none;"/>
+                        <small class="form-hint" style="margin-top:6px; text-align:center; color:#6b7280;">Tip: Use a clear, front-facing photo on a plain white background.</small>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-cancel" onclick="closeEditModal()">Cancel</button>

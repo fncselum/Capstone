@@ -30,6 +30,8 @@ $query = "SELECT e.*,
                  i.damaged_quantity,
                  i.availability_status,
                  i.item_size,
+                 i.borrow_period_days,
+                 i.importance_level,
                  COALESCE(i.available_quantity,
                           GREATEST(e.quantity - COALESCE(i.borrowed_quantity, 0) - COALESCE(i.damaged_quantity, 0), 0)
                  ) AS computed_available

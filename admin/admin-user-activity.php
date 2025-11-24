@@ -61,6 +61,7 @@ $stats_query = "SELECT
                     u.id,
                     u.student_id,
                     u.rfid_tag,
+                    u.email,
                     u.status,
                     u.penalty_points,
                     COUNT(DISTINCT t.id) as total_transactions,
@@ -76,7 +77,7 @@ $stats_query = "SELECT
 
 if (!empty($search_query)) {
     $search_escaped = $conn->real_escape_string($search_query);
-    $stats_query .= " AND (u.student_id LIKE '%$search_escaped%' OR u.rfid_tag LIKE '%$search_escaped%')";
+    $stats_query .= " AND (u.student_id LIKE '%$search_escaped%' OR u.rfid_tag LIKE '%$search_escaped%' OR u.email LIKE '%$search_escaped%')";
 }
 
 if ($filter_status !== 'all') {
@@ -98,7 +99,7 @@ if ($result) {
 // Get total count for pagination
 $count_query = "SELECT COUNT(DISTINCT u.id) as total FROM users u WHERE 1=1";
 if (!empty($search_query)) {
-    $count_query .= " AND (u.student_id LIKE '%$search_escaped%' OR u.rfid_tag LIKE '%$search_escaped%')";
+    $count_query .= " AND (u.student_id LIKE '%$search_escaped%' OR u.rfid_tag LIKE '%$search_escaped%' OR u.email LIKE '%$search_escaped%')";
 }
 if ($filter_status !== 'all') {
     $count_query .= " AND u.status = '$status_escaped'";
@@ -324,6 +325,7 @@ if ($overall_result) {
         .user-table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed; /* predictable column widths */
         }
         
         .user-table thead {
@@ -345,7 +347,59 @@ if ($overall_result) {
             padding: 14px 12px;
             border-bottom: 1px solid #f0f5f3;
             font-size: 0.9rem;
+            word-wrap: break-word;
+            overflow-wrap: anywhere;
         }
+
+        /* Column widths for stability next to sidebar */
+        .user-table th:nth-child(1),
+        .user-table td:nth-child(1) { width: 140px; }
+        .user-table th:nth-child(2),
+        .user-table td:nth-child(2) { width: 220px; }
+        .user-table th:nth-child(3),
+        .user-table td:nth-child(3) { width: 130px; }
+        .user-table th:nth-child(4),
+        .user-table td:nth-child(4) { width: 110px; }
+        .user-table th:nth-child(5),
+        .user-table td:nth-child(5) { width: 120px; text-align: center; }
+        .user-table th:nth-child(6),
+        .user-table td:nth-child(6) { width: 100px; text-align: center; }
+        .user-table th:nth-child(7),
+        .user-table td:nth-child(7) { width: 100px; text-align: center; }
+        .user-table th:nth-child(8),
+        .user-table td:nth-child(8) { width: 90px; text-align: center; }
+        .user-table th:nth-child(9),
+        .user-table td:nth-child(9) { width: 110px; text-align: center; }
+        .user-table th:nth-child(10),
+        .user-table td:nth-child(10) { width: 150px; }
+        .user-table th:nth-child(11),
+        .user-table td:nth-child(11) { width: 110px; text-align: center; }
+
+        /* View button tidying */
+        .view-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #7c3aed; /* purple */
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 700;
+            box-shadow: 0 2px 8px rgba(124,58,237,0.25);
+            transition: transform .15s ease, box-shadow .15s ease;
+            white-space: nowrap;
+        }
+        .view-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(124,58,237,0.35); }
+
+        /* When sidebar is hidden, use flexible table layout */
+        body.sidebar-hidden .user-table {
+            table-layout: auto;
+            min-width: auto !important;
+        }
+        body.sidebar-hidden .user-table th,
+        body.sidebar-hidden .user-table td { width: auto !important; text-align: left !important; }
+
         
         .user-table tbody tr {
             transition: background-color 0.2s ease;
@@ -676,7 +730,7 @@ if ($overall_result) {
                     <div class="filter-row">
                         <div class="filter-group">
                             <label for="search">Search</label>
-                            <input type="text" name="search" id="search" placeholder="Student ID or RFID..." value="<?= htmlspecialchars($search_query) ?>">
+                            <input type="text" name="search" id="search" placeholder="Student ID, RFID, or Email..." value="<?= htmlspecialchars($search_query) ?>">
                         </div>
                         <div class="filter-group">
                             <label for="status">Status</label>
@@ -726,10 +780,12 @@ if ($overall_result) {
                         No users found
                     </div>
                 <?php else: ?>
-                    <table class="user-table">
+                    <div style="overflow-x:auto; padding-bottom: 4px;">
+                    <table class="user-table" style="min-width: 1100px;">
                         <thead>
                             <tr>
                                 <th>Student ID</th>
+                                <th>Email</th>
                                 <th>RFID Tag</th>
                                 <th>Status</th>
                                 <th>Transactions</th>
@@ -745,6 +801,7 @@ if ($overall_result) {
                             <?php foreach ($user_stats as $user): ?>
                                 <tr>
                                     <td><?= htmlspecialchars($user['student_id']) ?></td>
+                                    <td><?= htmlspecialchars($user['email'] ?? '') ?></td>
                                     <td><?= htmlspecialchars($user['rfid_tag']) ?></td>
                                     <td>
                                         <span class="status-badge <?= strtolower($user['status']) ?>">
@@ -784,6 +841,7 @@ if ($overall_result) {
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                    </div>
 
                     <!-- Pagination -->
                     <?php if ($total_pages > 1): ?>
@@ -831,6 +889,10 @@ if ($overall_result) {
                             <div class="info-item">
                                 <div class="info-label">Student ID</div>
                                 <div class="info-value"><?= htmlspecialchars($user_details['student_id']) ?></div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Email</div>
+                                <div class="info-value"><?= htmlspecialchars($user_details['email'] ?? '—') ?></div>
                             </div>
                             <div class="info-item">
                                 <div class="info-label">RFID Tag</div>
