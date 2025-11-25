@@ -37,7 +37,7 @@ function columnExists($conn, $table, $column) {
 }
 
 /**
- * Process an uploaded image file. Returns relative path or null.
+ * Process an uploaded image file. Returns file path or null.
  */
 function handlePhotoUpload($fieldName, $student_id) {
     if (!isset($_FILES[$fieldName]) || !is_uploaded_file($_FILES[$fieldName]['tmp_name'])) {
@@ -48,20 +48,28 @@ function handlePhotoUpload($fieldName, $student_id) {
     if ($file['size'] > 2 * 1024 * 1024) { return null; } // 2MB
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($file['tmp_name']);
-    $ext = null;
-    switch ($mime) {
-        case 'image/jpeg': $ext = 'jpg'; break;
-        case 'image/png': $ext = 'png'; break;
-        default: return null;
+    if (!in_array($mime, ['image/jpeg', 'image/png'])) {
+        return null;
     }
-    $safeId = preg_replace('/[^A-Za-z0-9_-]/', '_', (string)$student_id);
-    $baseDir = realpath(__DIR__ . '/../../..') . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'user_photos';
-    if (!is_dir($baseDir)) { @mkdir($baseDir, 0775, true); }
-    $filename = 'user_' . $safeId . '_' . time() . '.' . $ext;
-    $dest = $baseDir . DIRECTORY_SEPARATOR . $filename;
-    if (!@move_uploaded_file($file['tmp_name'], $dest)) { return null; }
-    // Return path relative to web root
-    return 'uploads/user_photos/' . $filename;
+    
+    // Create uploads directory if it doesn't exist
+    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/Capstone/uploads/users/';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, true);
+    }
+    
+    // Generate unique filename
+    $extension = ($mime === 'image/png') ? 'png' : 'jpg';
+    $filename = 'user_' . $student_id . '_' . time() . '.' . $extension;
+    $filePath = $uploadDir . $filename;
+    $webPath = '/Capstone/uploads/users/' . $filename;
+    
+    // Move uploaded file
+    if (move_uploaded_file($file['tmp_name'], $filePath)) {
+        return $webPath;
+    }
+    
+    return null;
 }
 
 try {
@@ -191,15 +199,17 @@ function createUser($conn) {
     // Optional photo upload
     $photoPath = handlePhotoUpload('photo', $student_id);
     if ($photoPath && columnExists($conn, 'users', 'photo_path')) {
-        $p = $conn->real_escape_string($photoPath);
-        $conn->query("UPDATE users SET photo_path='$p', updated_at = NOW() WHERE id = $newId");
+        $stmt = $conn->prepare("UPDATE users SET photo_path = ?, updated_at = NOW() WHERE id = ?");
+        $stmt->bind_param('si', $photoPath, $newId);
+        $stmt->execute();
+        $stmt->close();
     }
 
     echo json_encode([
         'success' => true,
         'message' => 'User added successfully',
         'user_id' => $newId,
-        'photo_path' => $photoPath,
+        'has_photo' => $photoPath !== null,
         'email' => $email
     ]);
 }
@@ -299,14 +309,16 @@ function updateUser($conn) {
     // Optional new photo
     $photoPath = handlePhotoUpload('photo', $student_id);
     if ($photoPath && columnExists($conn, 'users', 'photo_path')) {
-        $p = $conn->real_escape_string($photoPath);
-        $conn->query("UPDATE users SET photo_path='$p', updated_at = NOW() WHERE id = $id");
+        $stmt = $conn->prepare("UPDATE users SET photo_path = ?, updated_at = NOW() WHERE id = ?");
+        $stmt->bind_param('si', $photoPath, $id);
+        $stmt->execute();
+        $stmt->close();
     }
     
     echo json_encode([
         'success' => true,
         'message' => 'User updated successfully',
-        'photo_path' => $photoPath,
+        'has_photo' => $photoPath !== null,
         'email' => $email
     ]);
 }
