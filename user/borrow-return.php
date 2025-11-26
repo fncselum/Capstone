@@ -6,6 +6,10 @@ if (!isset($_SESSION['user_id'])) {
     header('Location: index.php');
     exit;
 }
+if (empty($_SESSION['face_verified'])) {
+    header('Location: index.php?face=required');
+    exit;
+}
 
 $student_id = $_SESSION['student_id'] ?? 'Guest';
 $penalty_points = $_SESSION['penalty_points'] ?? 0;

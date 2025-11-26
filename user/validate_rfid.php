@@ -2,8 +2,17 @@
 session_start();
 header('Content-Type: application/json');
 
-// Include email configuration
-require_once '../admin/includes/email_config.php';
+// Include email configuration (with error handling)
+$email_config_loaded = false;
+if (file_exists('../admin/includes/email_config.php')) {
+    try {
+        require_once '../admin/includes/email_config.php';
+        $email_config_loaded = true;
+    } catch (Exception $e) {
+        // Continue without email functionality
+        error_log("Email config failed to load: " . $e->getMessage());
+    }
+}
 
 // Database connection
 $host = "localhost";
@@ -15,7 +24,13 @@ $conn = @new mysqli($host, $user, $password, $dbname);
 if ($conn->connect_error) {
     echo json_encode([
         'success' => false,
-        'message' => 'Database connection failed'
+        'message' => 'Database connection failed: ' . $conn->connect_error,
+        'debug' => [
+            'host' => $host,
+            'user' => $user,
+            'dbname' => $dbname,
+            'error' => $conn->connect_error
+        ]
     ]);
     exit;
 }
@@ -42,10 +57,22 @@ while ($col = $columns_result->fetch_assoc()) {
 // Build SELECT query based on existing columns
 $select_fields = ['id', 'rfid_tag', 'student_id', 'status', 'penalty_points'];
 $has_admin_fields = in_array('is_admin', $existing_columns) && in_array('admin_level', $existing_columns);
+$has_photo_path = in_array('photo_path', $existing_columns);
+$has_email = in_array('email', $existing_columns);
+$has_name = in_array('name', $existing_columns);
 
 if ($has_admin_fields) {
     $select_fields[] = 'is_admin';
     $select_fields[] = 'admin_level';
+}
+if ($has_photo_path) {
+    $select_fields[] = 'photo_path';
+}
+if ($has_email) {
+    $select_fields[] = 'email';
+}
+if ($has_name) {
+    $select_fields[] = 'name';
 }
 
 $select_sql = "SELECT " . implode(', ', $select_fields) . " FROM users WHERE rfid_tag = ? OR student_id = ?";
@@ -81,14 +108,15 @@ if ($result->num_rows > 0) {
         exit;
     }
     
-    // Store user info in session
+    // Set session variables
     $_SESSION['user_id'] = $user['id'];
-    $_SESSION['rfid_tag'] = $user['rfid_tag'];
+    $_SESSION['rfid_tag'] = $rfid;
     $_SESSION['student_id'] = $user['student_id'];
-    $_SESSION['is_admin'] = isset($user['is_admin']) ? (bool)$user['is_admin'] : false;
-    $_SESSION['admin_level'] = $user['admin_level'] ?? 'user';
     $_SESSION['penalty_points'] = $user['penalty_points'] ?? 0;
     
+    // Reset face verification status until user passes biometric check
+    $_SESSION['face_verified'] = false;
+
     // Check if user is admin
     $is_admin = isset($user['is_admin']) ? (bool)$user['is_admin'] : false;
     
@@ -100,6 +128,23 @@ if ($result->num_rows > 0) {
         $_SESSION['admin_level'] = $user['admin_level'];
     }
     
+    $photoBinary = $has_photo_path;
+    $photoUrl = null;
+    $hasPhoto = false;
+    
+    if ($has_photo_path && !empty($user['photo_path'])) {
+        // Check if photo_path contains a file path or binary data
+        if (strpos($user['photo_path'], '/') !== false || strpos($user['photo_path'], '\\') !== false) {
+            // It's a file path
+            $photoUrl = $user['photo_path'];
+            $hasPhoto = file_exists($_SERVER['DOCUMENT_ROOT'] . $photoUrl);
+        } else {
+            // It's binary data, use API endpoint
+            $photoUrl = 'api/get_user_photo.php';
+            $hasPhoto = true;
+        }
+    }
+
     echo json_encode([
         'success' => true,
         'message' => 'RFID verified successfully',
@@ -107,13 +152,24 @@ if ($result->num_rows > 0) {
         'admin_level' => $user['admin_level'] ?? 'user',
         'user_id' => $user['id'],
         'student_id' => $user['student_id'],
-        'penalty_points' => $user['penalty_points'] ?? 0
+        'penalty_points' => $user['penalty_points'] ?? 0,
+        'reference_photo_url' => $photoUrl,
+        'has_reference_photo' => $hasPhoto,
+        'user_name' => $user['name'] ?? $user['student_id'],
+        'user_email' => $user['email'] ?? 'Not provided',
+        'rfid_tag' => $user['rfid_tag']
     ]);
 } else {
     // User not found - Reject unauthorized access
-    // Send email alert to admin about unauthorized access attempt
-    $attemptTime = date('F j, Y g:i A');
-    sendUnauthorizedAccessAlert($conn, $rfid, $attemptTime);
+    // Send email alert to admin about unauthorized access attempt (if email config loaded)
+    if ($email_config_loaded && function_exists('sendUnauthorizedAccessAlert')) {
+        $attemptTime = date('F j, Y g:i A');
+        try {
+            sendUnauthorizedAccessAlert($conn, $rfid, $attemptTime);
+        } catch (Exception $e) {
+            error_log("Email alert failed: " . $e->getMessage());
+        }
+    }
     
     // Log unauthorized access attempt
     $log_stmt = $conn->prepare("INSERT INTO unauthorized_access_logs (rfid_tag, attempt_time, ip_address) VALUES (?, NOW(), ?)");

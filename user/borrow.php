@@ -1,16 +1,25 @@
 <?php
 session_start();
-date_default_timezone_set('Asia/Manila');
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header('Location: index.php');
     exit;
 }
+if (empty($_SESSION['face_verified'])) {
+    header('Location: index.php?face=required');
+    exit;
+}
 
 $user_id = $_SESSION['user_id'];
 $student_id = $_SESSION['student_id'] ?? 'Guest';
 $rfid_tag = $_SESSION['rfid_tag'] ?? '';
+
+// Log page access
+// SecuritySessionHandler::logSecurityEvent('page_access', [
+//     'page' => 'borrow.php',
+//     'user_id' => $_SESSION['user_id']
+// ]);
 
 // Database connection
 $host = "localhost";
