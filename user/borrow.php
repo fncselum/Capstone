@@ -21,7 +21,6 @@ $dbname = "capstone";
 $db_connected = true;
 $db_error = null;
 $conn = @new mysqli($host, $user, $password, $dbname);
-require_once __DIR__ . '/../admin/includes/email_config.php';
 if ($conn->connect_error) {
 	$db_connected = false;
 	$db_error = $conn->connect_error;
@@ -229,9 +228,6 @@ if ($db_connected) {
 									} else {
 										$message .= "<br><span style='color: #4caf50;'>✔ $new_available remaining in stock</span>";
 									}
-
-									// Email the borrower their expected return date (auto)
-									@sendBorrowNotification($conn, $user_id, $equipment_name, $return_date_formatted);
 								}
 							}
 							else {

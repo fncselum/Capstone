@@ -1188,7 +1188,13 @@ if (!$all_transactions) {
                                     $status = 'review';
                                     $statusLabel = 'Pending Review';
                                     $badgeClass = 'pending-review';
+                                } elseif (strcasecmp($rowStatus, 'Overdue') === 0) {
+                                    // Explicitly treat DB status = 'Overdue' as overdue
+                                    $status = 'overdue';
+                                    $statusLabel = 'Overdue';
+                                    $badgeClass = 'violation';
                                 } elseif ($row['transaction_type'] === 'Borrow' && $rowStatus === 'Active') {
+                                    // Backwards-compatible computed overdue for any remaining Active borrows
                                     if (isset($row['expected_return_date']) && strtotime($row['expected_return_date']) < time()) {
                                         $status = 'overdue';
                                         $statusLabel = 'Overdue';

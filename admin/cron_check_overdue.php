@@ -33,6 +33,22 @@ $log_message = "\n" . str_repeat("=", 60) . "\n";
 $log_message .= "Overdue Check Cron Job Started: " . date('Y-m-d H:i:s') . "\n";
 $log_message .= str_repeat("=", 60) . "\n";
 
+// 1) Update transaction status for overdue items
+//    Any active borrow whose expected_return_date is before today
+//    will be marked as 'Overdue' in the transactions.status column.
+$statusUpdateSql = "UPDATE transactions
+    SET status = 'Overdue'
+    WHERE transaction_type = 'Borrow'
+      AND status = 'Active'
+      AND DATE(expected_return_date) < CURDATE()";
+
+if ($conn->query($statusUpdateSql) === true) {
+    $affected = $conn->affected_rows;
+    $log_message .= "Status update: marked {$affected} transaction(s) as Overdue.\n";
+} else {
+    $log_message .= "Status update error: " . $conn->error . "\n";
+}
+
 // Check if email alerts are enabled
 if (!isEmailAlertsEnabled($conn)) {
     $log_message .= "Email alerts are disabled in system settings. Skipping email notifications.\n";
@@ -58,7 +74,7 @@ $query = "SELECT
           JOIN users u ON t.user_id = u.id
           JOIN equipment e ON t.equipment_id = e.rfid_tag
           WHERE t.transaction_type = 'Borrow'
-          AND t.status = 'Active'
+          AND t.status = 'Overdue'
           AND DATE(t.expected_return_date) < CURDATE()
           AND u.email IS NOT NULL
           AND u.email != ''

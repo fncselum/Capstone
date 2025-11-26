@@ -21,8 +21,6 @@ $db_connected = true;
 $db_error = null;
 
 $conn = @new mysqli($host, $user, $password, $dbname);
-// Email helpers
-require_once __DIR__ . '/../admin/includes/email_config.php';
 if ($conn->connect_error) {
 	$db_connected = false;
 	$db_error = $conn->connect_error;
@@ -302,21 +300,17 @@ if ($db_connected) {
 
 					// Transaction finalized - commit changes
 					$conn->commit();
-                    
-                    // Success message
-                    $message = "Equipment returned successfully!<br><strong>$equipment_name</strong><br>Transaction ID: #$transaction_id";
-                    // Update user penalty points if overdue
-                    if ($penalty > 0) {
-                        $update_penalty = $conn->prepare("UPDATE users SET penalty_points = penalty_points + ? WHERE id = ?");
-                        $update_penalty->bind_param("ii", $penalty, $user_id);
-                        $update_penalty->execute();
-                        $update_penalty->close();
-                        $message .= "<br><span style='color: #ff9800;'>⚠ Overdue penalty: $penalty points</span>";
-                        // Notify penalty via email (auto)
-                        @sendPenaltyNotification($conn, $user_id, $equipment_name, $penalty, 'Overdue return');
-                    }
-                    // Send return confirmation email
-                    @sendReturnNotification($conn, $user_id, $equipment_name, $condition_after);
+					
+					// Success message
+					$message = "Equipment returned successfully!<br><strong>$equipment_name</strong><br>Transaction ID: #$transaction_id";
+					// Update user penalty points if overdue
+					if ($penalty > 0) {
+						$update_penalty = $conn->prepare("UPDATE users SET penalty_points = penalty_points + ? WHERE id = ?");
+						$update_penalty->bind_param("ii", $penalty, $user_id);
+						$update_penalty->execute();
+						$update_penalty->close();
+						$message .= "<br><span style='color: #ff9800;'>⚠ Overdue penalty: $penalty points</span>";
+					}
 				} else {
 					$conn->rollback();
 					$error = 'Transaction not found or already returned.';
